@@ -321,7 +321,7 @@ function AuthScreen() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: `${window.location.origin}/chat`,
       },
     })
 
@@ -1098,11 +1098,26 @@ function App() {
 
     let active = true
 
-    supabase.auth.getSession().then(({ data }) => {
+    const initializeAuth = async () => {
+      const params = new URLSearchParams(window.location.search)
+      const code = params.get('code')
+
+      if (code) {
+        await supabase.auth.exchangeCodeForSession(code)
+        params.delete('code')
+        const clean = `${window.location.pathname}${
+          params.toString() ? `?${params.toString()}` : ''
+        }`
+        window.history.replaceState({}, '', clean)
+      }
+
+      const { data } = await supabase.auth.getSession()
       if (!active) return
       setSession(data.session)
       setBooting(false)
-    })
+    }
+
+    void initializeAuth()
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next)
