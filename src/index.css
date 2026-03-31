@@ -14,6 +14,8 @@
   --bubble-user: #dff0ff;
   --bubble-ai: #ffffff;
   --code-bg: #0f172a;
+  --app-height: 100dvh;
+  --keyboard-offset: 0px;
 }
 
 [data-theme='dark'] {
@@ -270,7 +272,7 @@ textarea:focus {
 .app-shell {
   display: grid;
   grid-template-columns: 288px minmax(0, 1fr);
-  height: 100vh;
+  height: var(--app-height, 100dvh);
   max-width: 1320px;
   margin: 0 auto;
   padding: 16px;
@@ -663,6 +665,9 @@ textarea:focus {
 
 .composer-wrap {
   padding: 10px 16px 16px;
+  padding-bottom: calc(
+    16px + env(safe-area-inset-bottom, 0px) + var(--keyboard-offset, 0px)
+  );
   border-top: 1px solid var(--border);
   overflow: hidden;
   background: linear-gradient(
@@ -792,10 +797,11 @@ textarea {
 }
 
 .dashboard-screen {
-  height: 100vh;
+  height: var(--app-height, 100dvh);
   display: grid;
   place-items: center;
   padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   overflow: auto;
 }
 
@@ -807,7 +813,8 @@ textarea {
   backdrop-filter: blur(14px);
   box-shadow: var(--shadow);
   padding: 18px;
-  max-height: calc(100vh - 32px);
+  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  max-height: calc(var(--app-height, 100dvh) - 32px);
   overflow: auto;
 }
 
@@ -991,6 +998,9 @@ textarea {
 
   .composer-wrap {
     padding: 8px 10px 10px;
+    padding-bottom: calc(
+      10px + env(safe-area-inset-bottom, 0px) + var(--keyboard-offset, 0px)
+    );
   }
 
   .composer {
@@ -1006,13 +1016,15 @@ textarea {
 
   .dashboard-screen {
     padding: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     align-items: start;
   }
 
   .dashboard-card {
     width: 100%;
-    max-height: none;
-    min-height: calc(100vh - 20px);
+    max-height: calc(var(--app-height, 100dvh) - 20px);
+    min-height: auto;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
   .bubble {
