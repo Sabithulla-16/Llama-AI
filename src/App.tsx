@@ -18,12 +18,17 @@ import {
   MessageSquarePlus,
   Copy,
   Share2,
+  ChevronDown,
+  Mic,
+  SendHorizontal,
+  Square,
   LayoutDashboard,
   Trash2,
   LogOut,
   Sun,
   Moon,
   X,
+  Volume2,
 } from 'lucide-react'
 
 type Role = 'user' | 'assistant'
@@ -40,15 +45,79 @@ type ChatMessage = {
   conversation_id: string
   role: Role
   content: string
+  model?: AIModel | null
+  model_used?: AIModel | null
   created_at: string
 }
 
 type ThemeMode = 'light' | 'dark'
 type ResponseStyle = 'balanced' | 'concise' | 'detailed'
 type PromptPurpose = 'general' | 'coding' | 'business' | 'study' | 'writing'
+type AIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart'
+type VoiceLanguage = 'en-US' | 'en-GB' | 'hi-IN'
+type Tone =
+  | 'default'
+  | 'formal'
+  | 'casual'
+  | 'genz'
+  | 'funny'
+  | 'motivational'
+  | 'technical'
+  | 'minimal'
+  | 'detailed'
+  | 'creative'
+  | 'empathetic'
+  | 'business'
+  | 'academic'
 
-const CHAT_API = 'https://valtry-llama3-2-3b-quantized.hf.space/v1/chat/completions'
-const STOP_API = 'https://valtry-llama3-2-3b-quantized.hf.space/v1/stop'
+const API_BASE =
+  ((import.meta.env.VITE_API_BASE_URL as string | undefined) ||
+    'https://valtry-llama3-2-3b-quantized.hf.space').replace(/\/+$/, '')
+const STOP_API = `${API_BASE}/v1/stop`
+const MODEL_ENDPOINTS: Record<AIModel, string> = {
+  llama: '/v1/chat/llama',
+  qwen: '/v1/chat/qwen',
+  coder: '/v1/chat/coder',
+  mini: '/v1/chat/mini',
+  smart: '/v1/chat/smart',
+}
+const MODEL_LABELS: Record<AIModel, string> = {
+  llama: 'General',
+  qwen: 'Fast',
+  coder: 'Coding',
+  mini: 'Very Fast',
+  smart: 'Fast + Smart',
+}
+const MODEL_ENGINE_LABELS: Record<AIModel, string> = {
+  llama: 'Llama',
+  qwen: 'Qwen',
+  coder: 'Coder',
+  mini: 'Mini',
+  smart: 'Smart',
+}
+
+const isAIModel = (value: unknown): value is AIModel =>
+  typeof value === 'string' && value in MODEL_ENDPOINTS
+
+const getMessageModel = (message: ChatMessage): AIModel | null => {
+  const candidate = message.model ?? message.model_used
+  return isAIModel(candidate) ? candidate : null
+}
+const TONE_LABELS: Record<Tone, string> = {
+  default: 'Default',
+  formal: 'Formal',
+  casual: 'Casual',
+  genz: 'Gen Z',
+  funny: 'Funny',
+  motivational: 'Motivational',
+  technical: 'Technical',
+  minimal: 'Minimal',
+  detailed: 'Detailed',
+  creative: 'Creative',
+  empathetic: 'Empathetic',
+  business: 'Business',
+  academic: 'Academic',
+}
 
 const PURPOSE_PROMPTS: Record<PromptPurpose, string[]> = {
   general: [
@@ -99,6 +168,124 @@ const PURPOSE_LABELS: Record<PromptPurpose, string> = {
   business: 'Business',
   study: 'Study',
   writing: 'Writing',
+}
+
+const RESPONSE_STYLE_LABELS: Record<ResponseStyle, string> = {
+  balanced: 'Balanced',
+  concise: 'Concise',
+  detailed: 'Detailed',
+}
+
+const VOICE_LANGUAGE_LABELS: Record<VoiceLanguage, string> = {
+  'en-US': 'English (US)',
+  'en-GB': 'English (UK)',
+  'hi-IN': 'Hindi',
+}
+
+type DropdownOption<T extends string> = {
+  value: T
+  label: string
+}
+
+type CustomDropdownProps<T extends string> = {
+  value: T
+  options: DropdownOption<T>[]
+  onChange: (value: T) => void
+  triggerClassName?: string
+  menuClassName?: string
+}
+
+function CustomDropdown<T extends string>({
+  value,
+  options,
+  onChange,
+  triggerClassName = 'composer-select model-select-trigger',
+  menuClassName = 'model-select-menu',
+}: CustomDropdownProps<T>) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [isOpen, setIsOpen] = useState(false)
+  const [menuDirection, setMenuDirection] = useState<'up' | 'down'>('down')
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!isOpen) return
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setIsOpen(false)
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isOpen])
+
+  const toggleMenu = () => {
+    if (!isOpen) {
+      const trigger = triggerRef.current
+      if (trigger) {
+        const rect = trigger.getBoundingClientRect()
+        const spaceBelow = window.innerHeight - rect.bottom
+        const spaceAbove = rect.top
+        setMenuDirection(spaceBelow < 220 && spaceAbove > spaceBelow ? 'up' : 'down')
+      }
+    }
+    setIsOpen((prev) => !prev)
+  }
+
+  const selectedOption =
+    options.find((option) => option.value === value) || options[0]
+
+  return (
+    <div className="model-dropdown">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={triggerClassName}
+        onClick={toggleMenu}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span>{selectedOption?.label || ''}</span>
+        <ChevronDown size={16} />
+      </button>
+      {isOpen && (
+        <div
+          ref={menuRef}
+          className={`${menuClassName} ${menuDirection}`}
+          role="listbox"
+        >
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`model-select-option ${
+                value === option.value ? 'active' : ''
+              }`}
+              onClick={() => {
+                onChange(option.value)
+                setIsOpen(false)
+              }}
+              role="option"
+              aria-selected={value === option.value}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function pickRandomPrompts(purpose: PromptPurpose, count = 4) {
@@ -164,11 +351,19 @@ function slugify(value: string) {
     .slice(0, 70) || 'chat'
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+}
+
 async function streamCompletion(
+  apiUrl: string,
   payload: {
     user_id: string
     conversation_id: string
     messages: Pick<ChatMessage, 'role' | 'content'>[]
+    tone: Tone
     temperature?: number
     max_tokens?: number
     stream?: boolean
@@ -176,7 +371,7 @@ async function streamCompletion(
   signal: AbortSignal,
   onToken: (token: string) => void,
 ) {
-  const response = await fetch(CHAT_API, {
+  const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -186,6 +381,7 @@ async function streamCompletion(
       user_id: payload.user_id,
       conversation_id: payload.conversation_id,
       messages: payload.messages,
+      tone: payload.tone,
       temperature: payload.temperature ?? 0.7,
       max_tokens: payload.max_tokens ?? 512,
       stream: payload.stream ?? true,
@@ -194,7 +390,8 @@ async function streamCompletion(
   })
 
   if (!response.ok || !response.body) {
-    throw new Error('Could not start streaming response.')
+    const details = `HTTP ${response.status} ${response.statusText}`.trim()
+    throw new Error(`Could not start streaming response (${details}) from ${apiUrl}.`)
   }
 
   const reader = response.body.getReader()
@@ -448,10 +645,14 @@ function AuthScreen() {
 type ChatWorkspaceProps = {
   conversations: Conversation[]
   activeConversationId: string | null
+  activeConversationModel: AIModel
   activeMessages: ChatMessage[]
   promptPurpose: PromptPurpose
   promptCards: string[]
   draft: string
+  selectedModel: AIModel
+  enterToSend: boolean
+  voiceLanguage: VoiceLanguage
   isGenerating: boolean
   generatingConversationId: string | null
   error: string
@@ -460,6 +661,7 @@ type ChatWorkspaceProps = {
   sidebarOpen: boolean
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   setDraft: React.Dispatch<React.SetStateAction<string>>
+  setSelectedModel: React.Dispatch<React.SetStateAction<AIModel>>
   onSendOrStop: () => Promise<void>
   sendMessage: (input: string) => Promise<void>
   onNewChat: () => Promise<void>
@@ -475,10 +677,14 @@ type ChatWorkspaceProps = {
 function ChatWorkspace({
   conversations,
   activeConversationId,
+  activeConversationModel,
   activeMessages,
   promptPurpose,
   promptCards,
   draft,
+  selectedModel,
+  enterToSend,
+  voiceLanguage,
   isGenerating,
   generatingConversationId,
   error,
@@ -487,6 +693,7 @@ function ChatWorkspace({
   sidebarOpen,
   setSidebarOpen,
   setDraft,
+  setSelectedModel,
   onSendOrStop,
   sendMessage,
   onNewChat,
@@ -499,6 +706,131 @@ function ChatWorkspace({
   endRef,
 }: ChatWorkspaceProps) {
   const navigate = useNavigate()
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const recognitionRef = useRef<any>(null)
+  const voiceBaseDraftRef = useRef('')
+  const maxComposerHeight = 260
+  const [isListening, setIsListening] = useState(false)
+  const [isVoiceSupported, setIsVoiceSupported] = useState(false)
+  const [readingMessageId, setReadingMessageId] = useState<string | null>(null)
+  const synthRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+
+  const resizeComposerTextarea = (textarea: HTMLTextAreaElement) => {
+    textarea.style.height = 'auto'
+    const nextHeight = Math.min(textarea.scrollHeight, maxComposerHeight)
+    textarea.style.height = `${Math.max(nextHeight, 42)}px`
+  }
+
+  useEffect(() => {
+    const textarea = composerTextareaRef.current
+    if (!textarea) return
+
+    resizeComposerTextarea(textarea)
+  }, [draft])
+
+  useEffect(() => {
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+
+    if (!SpeechRecognitionCtor) {
+      setIsVoiceSupported(false)
+      return
+    }
+
+    setIsVoiceSupported(true)
+    const recognition = new SpeechRecognitionCtor()
+    recognition.lang = voiceLanguage
+    recognition.continuous = true
+    recognition.interimResults = true
+
+    recognition.onresult = (event: any) => {
+      let transcript = ''
+      for (let i = 0; i < event.results.length; i += 1) {
+        transcript += event.results[i][0].transcript
+      }
+
+      const base = voiceBaseDraftRef.current
+      const spacer = base && !base.endsWith(' ') ? ' ' : ''
+      setDraft(`${base}${spacer}${transcript.trimStart()}`)
+    }
+
+    recognition.onstart = () => {
+      setIsListening(true)
+    }
+
+    recognition.onerror = () => {
+      setIsListening(false)
+    }
+
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+
+    recognitionRef.current = recognition
+    return () => {
+      recognition.stop()
+      recognitionRef.current = null
+    }
+  }, [setDraft, voiceLanguage])
+
+  const toggleVoiceTyping = () => {
+    const recognition = recognitionRef.current
+    if (!recognition) return
+
+    if (isListening) {
+      recognition.stop()
+      return
+    }
+
+    voiceBaseDraftRef.current = draft.trimEnd()
+    try {
+      recognition.start()
+    } catch {
+      // Ignore repeated start errors from some browsers.
+    }
+  }
+
+  const handleReadAloud = (messageId: string, content: string) => {
+    // Stop any currently reading message
+    if (readingMessageId === messageId) {
+      window.speechSynthesis.cancel()
+      setReadingMessageId(null)
+      return
+    }
+
+    // Stop previous reading
+    if (readingMessageId) {
+      window.speechSynthesis.cancel()
+    }
+
+    // Remove markdown formatting for reading
+    const plainText = content
+      .replace(/\*\*(.+?)\*\*/g, '$1') // Bold
+      .replace(/\*(.+?)\*/g, '$1') // Italic
+      .replace(/```[\s\S]*?```/g, '') // Code blocks
+      .replace(/`(.+?)`/g, '$1') // Inline code
+      .replace(/\[(.+?)\]\(.+?\)/g, '$1') // Links
+      .replace(/#{1,6}\s/g, '') // Headers
+
+    const utterance = new SpeechSynthesisUtterance(plainText)
+    utterance.lang = voiceLanguage
+    utterance.onend = () => setReadingMessageId(null)
+    utterance.onerror = () => setReadingMessageId(null)
+
+    setReadingMessageId(messageId)
+    synthRef.current = utterance
+    window.speechSynthesis.speak(utterance)
+  }
+
+  const handleCopyMessage = (messageId: string, content: string) => {
+    void navigator.clipboard.writeText(content)
+    setCopiedMessageId(messageId)
+    setTimeout(() => setCopiedMessageId(null), 2000)
+  }
+
+  const isStopState =
+    isGenerating && activeConversationId === generatingConversationId
 
   return (
     <div className="app-shell">
@@ -515,38 +847,40 @@ function ChatWorkspace({
           New Chat
         </button>
 
-        <div className="conversation-list">
-          {conversations.map((conv) => (
-            <div
-              key={conv.id}
-              className={`conversation-row ${
-                activeConversationId === conv.id ? 'active' : ''
-              }`}
-            >
-              <button
-                className="conversation-item"
-                onClick={() => onSelectConversation(conv.id)}
+        <div className="conversations-container">
+          <div className="conversation-list">
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                className={`conversation-row ${
+                  activeConversationId === conv.id ? 'active' : ''
+                }`}
               >
-                {conv.title}
-              </button>
-              <div className="conversation-actions">
                 <button
-                  className="conversation-share"
-                  onClick={() => void onShareConversation(conv.id)}
-                  aria-label="Share conversation"
+                  className="conversation-item"
+                  onClick={() => onSelectConversation(conv.id)}
                 >
-                  <Share2 size={14} />
+                  {conv.title}
                 </button>
-                <button
-                  className="conversation-delete"
-                  onClick={() => onDeleteConversationRequest(conv.id)}
-                  aria-label="Delete conversation"
-                >
-                  <Trash2 size={14} />
-                </button>
+                <div className="conversation-actions">
+                  <button
+                    className="conversation-share"
+                    onClick={() => void onShareConversation(conv.id)}
+                    aria-label="Share conversation"
+                  >
+                    <Share2 size={14} />
+                  </button>
+                  <button
+                    className="conversation-delete"
+                    onClick={() => onDeleteConversationRequest(conv.id)}
+                    aria-label="Delete conversation"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         <button className="sidebar-settings" onClick={() => navigate('/dashboard')}>
@@ -604,6 +938,10 @@ function ChatWorkspace({
                   !message.content.trim() &&
                   isGenerating &&
                   index === activeMessages.length - 1
+                const messageModel =
+                  message.role === 'assistant'
+                    ? getMessageModel(message) || activeConversationModel
+                    : null
 
                 return (
                   <article
@@ -652,20 +990,32 @@ function ChatWorkspace({
                           <div className="message-actions">
                             <button
                               type="button"
-                              className="ghost-button"
-                              onClick={() => void navigator.clipboard.writeText(message.content)}
+                              className={`ghost-button action-btn ${copiedMessageId === message.id ? 'copied' : ''}`}
+                              onClick={() => handleCopyMessage(message.id, message.content)}
                             >
                               <Copy size={14} />
-                              Copy
+                              {copiedMessageId === message.id ? 'Copied' : 'Copy'}
                             </button>
                             <button
                               type="button"
-                              className="ghost-button"
+                              className={`ghost-button action-btn ${readingMessageId === message.id ? 'reading' : ''}`}
+                              onClick={() => handleReadAloud(message.id, message.content)}
+                              title={readingMessageId === message.id ? 'Stop reading' : 'Read aloud'}
+                            >
+                              <Volume2 size={14} className={readingMessageId === message.id ? 'speaker-wave' : ''} />
+                              {readingMessageId === message.id ? 'Stop' : 'Read'}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button action-btn"
                               onClick={() => void onShareMessage(message.content)}
                             >
                               <Share2 size={14} />
                               Share
                             </button>
+                            <span className="message-model-chip">
+                              Model: {MODEL_ENGINE_LABELS[messageModel || activeConversationModel]}
+                            </span>
                           </div>
                         </>
                       ) : (
@@ -683,14 +1033,33 @@ function ChatWorkspace({
         <footer className="composer-wrap">
           {error && <p className="error-text">{error}</p>}
           {notice && <p className="notice-text">{notice}</p>}
+          <div className="composer-options">
+            <CustomDropdown
+              value={selectedModel}
+              options={(Object.keys(MODEL_LABELS) as AIModel[]).map((model) => ({
+                value: model,
+                label: MODEL_LABELS[model],
+              }))}
+              onChange={setSelectedModel}
+            />
+          </div>
           <div className="composer">
             <textarea
+              ref={composerTextareaRef}
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                const target = event.currentTarget
+                resizeComposerTextarea(target)
+                setDraft(event.target.value)
+              }}
               placeholder="Type your message..."
               rows={1}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
+                const shouldSend =
+                  event.key === 'Enter' &&
+                  (enterToSend ? !event.shiftKey : (event.ctrlKey || event.metaKey))
+
+                if (shouldSend) {
                   event.preventDefault()
                   if (
                     isGenerating &&
@@ -702,26 +1071,43 @@ function ChatWorkspace({
                 }
               }}
             />
-            <button
-              className={`send-button ${
-                isGenerating && activeConversationId === generatingConversationId
-                  ? 'stop'
-                  : 'send'
-              }`}
-              onClick={() => {
-                if (isGenerating && activeConversationId !== generatingConversationId) {
-                  return
-                }
-                void onSendOrStop()
-              }}
-              disabled={isGenerating && activeConversationId !== generatingConversationId}
-            >
-              {isGenerating && activeConversationId === generatingConversationId
-                ? 'Stop'
-                : isGenerating
-                  ? 'Busy'
-                  : 'Send'}
-            </button>
+            <div className="composer-actions">
+              <button
+                type="button"
+                className={`composer-action-button voice-button ${
+                  isListening ? 'listening' : ''
+                }`}
+                onClick={toggleVoiceTyping}
+                disabled={!isVoiceSupported}
+                aria-label={isListening ? 'Stop voice typing' : 'Start voice typing'}
+                title={isVoiceSupported ? 'Voice typing' : 'Voice typing unavailable'}
+              >
+                {isListening && <span className="action-ring-loader" aria-hidden="true" />}
+                <Mic size={22} />
+              </button>
+
+              <button
+                type="button"
+                className={`composer-action-button send-button ${
+                  isStopState ? 'stop' : 'send'
+                }`}
+                onClick={() => {
+                  if (isGenerating && activeConversationId !== generatingConversationId) {
+                    return
+                  }
+                  void onSendOrStop()
+                }}
+                disabled={isGenerating && activeConversationId !== generatingConversationId}
+                aria-label={isStopState ? 'Stop generation' : 'Send message'}
+              >
+                {isStopState && <span className="action-ring-loader" aria-hidden="true" />}
+                {isStopState ? (
+                  <Square size={18} />
+                ) : (
+                  <SendHorizontal size={22} />
+                )}
+              </button>
+            </div>
           </div>
         </footer>
       </div>
@@ -761,10 +1147,22 @@ type DashboardProps = {
   displayName: string
   responseStyle: ResponseStyle
   promptPurpose: PromptPurpose
+  selectedTone: Tone
+  enterToSend: boolean
+  suggestionCount: 4 | 6
+  voiceLanguage: VoiceLanguage
+  confirmClearChats: boolean
   onSavePersonalization: (
     name: string,
     style: ResponseStyle,
     purpose: PromptPurpose,
+    tone: Tone,
+  ) => void
+  onSaveExperienceSettings: (
+    enterToSend: boolean,
+    suggestionCount: 4 | 6,
+    voiceLanguage: VoiceLanguage,
+    confirmClearChats: boolean,
   ) => void
   onClearChats: () => Promise<void>
   onLogout: () => Promise<void>
@@ -781,7 +1179,13 @@ function Dashboard({
   displayName,
   responseStyle,
   promptPurpose,
+  selectedTone,
+  enterToSend,
+  suggestionCount,
+  voiceLanguage,
+  confirmClearChats,
   onSavePersonalization,
+  onSaveExperienceSettings,
   onClearChats,
   onLogout,
 }: DashboardProps) {
@@ -789,12 +1193,31 @@ function Dashboard({
   const [nameDraft, setNameDraft] = useState(displayName)
   const [styleDraft, setStyleDraft] = useState<ResponseStyle>(responseStyle)
   const [purposeDraft, setPurposeDraft] = useState<PromptPurpose>(promptPurpose)
+  const [toneDraft, setToneDraft] = useState<Tone>(selectedTone)
+  const [enterToSendDraft, setEnterToSendDraft] = useState(enterToSend)
+  const [suggestionCountDraft, setSuggestionCountDraft] = useState<4 | 6>(suggestionCount)
+  const [voiceLanguageDraft, setVoiceLanguageDraft] = useState<VoiceLanguage>(voiceLanguage)
+  const [confirmClearDraft, setConfirmClearDraft] = useState(confirmClearChats)
 
   useEffect(() => {
     setNameDraft(displayName)
     setStyleDraft(responseStyle)
     setPurposeDraft(promptPurpose)
-  }, [displayName, responseStyle, promptPurpose])
+    setToneDraft(selectedTone)
+    setEnterToSendDraft(enterToSend)
+    setSuggestionCountDraft(suggestionCount)
+    setVoiceLanguageDraft(voiceLanguage)
+    setConfirmClearDraft(confirmClearChats)
+  }, [
+    displayName,
+    responseStyle,
+    promptPurpose,
+    selectedTone,
+    enterToSend,
+    suggestionCount,
+    voiceLanguage,
+    confirmClearChats,
+  ])
 
   const initials = (nameDraft || email || 'U')
     .trim()
@@ -807,7 +1230,10 @@ function Dashboard({
     <div className="dashboard-screen">
       <div className="dashboard-card">
         <div className="dashboard-head">
-          <h2>User Dashboard</h2>
+          <div>
+            <h2>User Dashboard</h2>
+            <p className="muted-text">Customize your chat experience</p>
+          </div>
           <button
             className="icon-button"
             onClick={() => navigate('/chat')}
@@ -841,6 +1267,7 @@ function Dashboard({
           </article>
         </section>
 
+        <section className="dashboard-layout">
         <section className="personalize-panel">
           <h3>Personalization</h3>
           <div className="personalize-grid">
@@ -854,47 +1281,123 @@ function Dashboard({
               />
             </label>
 
-            <label className="field-block" htmlFor="response-style">
+            <label className="field-block">
               Response Style
-              <select
-                id="response-style"
+              <CustomDropdown
                 value={styleDraft}
-                onChange={(event) =>
-                  setStyleDraft(event.target.value as ResponseStyle)
-                }
-              >
-                <option value="balanced">Balanced</option>
-                <option value="concise">Concise</option>
-                <option value="detailed">Detailed</option>
-              </select>
+                options={(Object.keys(RESPONSE_STYLE_LABELS) as ResponseStyle[]).map(
+                  (style) => ({
+                    value: style,
+                    label: RESPONSE_STYLE_LABELS[style],
+                  }),
+                )}
+                onChange={setStyleDraft}
+              />
             </label>
 
-            <label className="field-block" htmlFor="prompt-purpose">
+            <label className="field-block">
               Purpose
-              <select
-                id="prompt-purpose"
+              <CustomDropdown
                 value={purposeDraft}
-                onChange={(event) =>
-                  setPurposeDraft(event.target.value as PromptPurpose)
-                }
-              >
-                <option value="general">General</option>
-                <option value="coding">Coding</option>
-                <option value="business">Business</option>
-                <option value="study">Study</option>
-                <option value="writing">Writing</option>
-              </select>
+                options={(Object.keys(PURPOSE_LABELS) as PromptPurpose[]).map(
+                  (purpose) => ({
+                    value: purpose,
+                    label: PURPOSE_LABELS[purpose],
+                  }),
+                )}
+                onChange={setPurposeDraft}
+              />
+            </label>
+
+            <label className="field-block">
+              Tone
+              <CustomDropdown
+                value={toneDraft}
+                options={(Object.keys(TONE_LABELS) as Tone[]).map((tone) => ({
+                  value: tone,
+                  label: TONE_LABELS[tone],
+                }))}
+                onChange={setToneDraft}
+              />
             </label>
           </div>
 
           <button
             className="secondary-button"
             onClick={() =>
-              onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft)
+              onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft, toneDraft)
             }
           >
             Save Preferences
           </button>
+        </section>
+
+        <section className="personalize-panel">
+          <h3>Chat Experience</h3>
+          <div className="personalize-grid">
+            <label className="field-block">
+              Enter Key Behavior
+              <button
+                type="button"
+                className="settings-item"
+                onClick={() => setEnterToSendDraft((prev) => !prev)}
+              >
+                {enterToSendDraft ? 'Enter sends message' : 'Enter adds new line'}
+              </button>
+            </label>
+
+            <label className="field-block">
+              Voice Language
+              <CustomDropdown
+                value={voiceLanguageDraft}
+                options={(Object.keys(VOICE_LANGUAGE_LABELS) as VoiceLanguage[]).map(
+                  (lang) => ({
+                    value: lang,
+                    label: VOICE_LANGUAGE_LABELS[lang],
+                  }),
+                )}
+                onChange={setVoiceLanguageDraft}
+              />
+            </label>
+
+            <label className="field-block">
+              Suggestion Cards
+              <CustomDropdown
+                value={String(suggestionCountDraft) as '4' | '6'}
+                options={[
+                  { value: '4', label: '4 cards' },
+                  { value: '6', label: '6 cards' },
+                ]}
+                onChange={(value) => setSuggestionCountDraft(value === '6' ? 6 : 4)}
+              />
+            </label>
+
+            <label className="field-block">
+              Clear Chats Safety
+              <button
+                type="button"
+                className="settings-item"
+                onClick={() => setConfirmClearDraft((prev) => !prev)}
+              >
+                {confirmClearDraft ? 'Ask before clearing chats' : 'Clear chats immediately'}
+              </button>
+            </label>
+          </div>
+
+          <button
+            className="secondary-button"
+            onClick={() =>
+              onSaveExperienceSettings(
+                enterToSendDraft,
+                suggestionCountDraft,
+                voiceLanguageDraft,
+                confirmClearDraft,
+              )
+            }
+          >
+            Save Experience Settings
+          </button>
+        </section>
         </section>
 
         <div className="dashboard-grid">
@@ -936,6 +1439,8 @@ function App() {
     pickRandomPrompts('general'),
   )
   const [draft, setDraft] = useState('')
+  const [selectedModel, setSelectedModel] = useState<AIModel>('llama')
+  const [selectedTone, setSelectedTone] = useState<Tone>('default')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
@@ -946,6 +1451,10 @@ function App() {
   const [theme, setTheme] = useState<ThemeMode>('light')
   const [displayName, setDisplayName] = useState('')
   const [responseStyle, setResponseStyle] = useState<ResponseStyle>('balanced')
+  const [enterToSend, setEnterToSend] = useState(true)
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('en-US')
+  const [suggestionCount, setSuggestionCount] = useState<4 | 6>(4)
+  const [confirmClearChats, setConfirmClearChats] = useState(true)
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -1010,6 +1519,7 @@ function App() {
     name: string,
     style: ResponseStyle,
     purpose: PromptPurpose,
+    tone: Tone,
   ) => {
     if (!session?.user) return
 
@@ -1017,17 +1527,59 @@ function App() {
     setDisplayName(safeName)
     setResponseStyle(style)
     setPromptPurpose(purpose)
+    setSelectedTone(tone)
     localStorage.setItem(`display-name:${session.user.id}`, safeName)
     localStorage.setItem(`response-style:${session.user.id}`, style)
     localStorage.setItem(`prompt-purpose:${session.user.id}`, purpose)
-    setPromptCards(pickRandomPrompts(purpose))
+    localStorage.setItem(`selected-tone:${session.user.id}`, tone)
+    setPromptCards(pickRandomPrompts(purpose, suggestionCount))
     showNotice('Preferences saved.')
+  }
+
+  const onSaveExperienceSettings = (
+    nextEnterToSend: boolean,
+    nextSuggestionCount: 4 | 6,
+    nextVoiceLanguage: VoiceLanguage,
+    nextConfirmClearChats: boolean,
+  ) => {
+    if (!session?.user) return
+
+    setEnterToSend(nextEnterToSend)
+    setSuggestionCount(nextSuggestionCount)
+    setVoiceLanguage(nextVoiceLanguage)
+    setConfirmClearChats(nextConfirmClearChats)
+
+    localStorage.setItem(`enter-to-send:${session.user.id}`, String(nextEnterToSend))
+    localStorage.setItem(
+      `suggestion-count:${session.user.id}`,
+      String(nextSuggestionCount),
+    )
+    localStorage.setItem(`voice-language:${session.user.id}`, nextVoiceLanguage)
+    localStorage.setItem(
+      `confirm-clear-chats:${session.user.id}`,
+      String(nextConfirmClearChats),
+    )
+
+    setPromptCards(pickRandomPrompts(promptPurpose, nextSuggestionCount))
+    showNotice('Experience settings saved.')
   }
 
   const activeMessages = useMemo(() => {
     if (!activeConversationId) return []
     return messagesMap[activeConversationId] || []
   }, [activeConversationId, messagesMap])
+
+  const activeConversationModel: AIModel = useMemo(() => {
+    if (!activeConversationId) return selectedModel
+    const messages = messagesMap[activeConversationId] || []
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i]
+      if (message.role !== 'assistant') continue
+      const model = getMessageModel(message)
+      if (model) return model
+    }
+    return selectedModel
+  }, [activeConversationId, messagesMap, selectedModel])
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme-mode') as ThemeMode | null
@@ -1043,8 +1595,8 @@ function App() {
     localStorage.setItem('theme-mode', theme)
   }, [theme])
 
-  const refreshPromptCards = (purpose = promptPurpose) => {
-    setPromptCards(pickRandomPrompts(purpose))
+  const refreshPromptCards = (purpose = promptPurpose, count = suggestionCount) => {
+    setPromptCards(pickRandomPrompts(purpose, count))
   }
 
   useEffect(() => {
@@ -1054,6 +1606,11 @@ function App() {
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
     const storedStyle = localStorage.getItem(`response-style:${keyPrefix}`)
     const storedPurpose = localStorage.getItem(`prompt-purpose:${keyPrefix}`)
+    const storedTone = localStorage.getItem(`selected-tone:${keyPrefix}`)
+    const storedEnterToSend = localStorage.getItem(`enter-to-send:${keyPrefix}`)
+    const storedSuggestionCount = localStorage.getItem(`suggestion-count:${keyPrefix}`)
+    const storedVoiceLanguage = localStorage.getItem(`voice-language:${keyPrefix}`)
+    const storedConfirmClear = localStorage.getItem(`confirm-clear-chats:${keyPrefix}`)
 
     setDisplayName(
       storedName ||
@@ -1078,8 +1635,28 @@ function App() {
         ? storedPurpose
         : 'general'
 
+    const validTones: Tone[] = [
+      'default', 'formal', 'casual', 'genz', 'funny', 'motivational',
+      'technical', 'minimal', 'detailed', 'creative', 'empathetic',
+      'business', 'academic',
+    ]
+    const resolvedTone: Tone = validTones.includes(storedTone as Tone)
+      ? (storedTone as Tone)
+      : 'default'
+
+    const resolvedSuggestionCount: 4 | 6 = storedSuggestionCount === '6' ? 6 : 4
+    const resolvedVoiceLanguage: VoiceLanguage =
+      storedVoiceLanguage === 'en-GB' || storedVoiceLanguage === 'hi-IN'
+        ? storedVoiceLanguage
+        : 'en-US'
+
     setPromptPurpose(resolvedPurpose)
-    setPromptCards(pickRandomPrompts(resolvedPurpose))
+    setSelectedTone(resolvedTone)
+    setEnterToSend(storedEnterToSend !== 'false')
+    setSuggestionCount(resolvedSuggestionCount)
+    setVoiceLanguage(resolvedVoiceLanguage)
+    setConfirmClearChats(storedConfirmClear !== 'false')
+    setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
   }, [session?.user])
 
   useEffect(() => {
@@ -1223,6 +1800,49 @@ function App() {
     }))
   }
 
+  const persistModelForLatestAssistantMessage = async (
+    conversationId: string,
+    model: AIModel,
+  ) => {
+    if (!supabase) return
+
+    const { data: latestAssistantRows, error: loadError } = await supabase
+      .from('messages')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'assistant')
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (loadError || !latestAssistantRows || latestAssistantRows.length === 0) {
+      return
+    }
+
+    const latestAssistantId = latestAssistantRows[0]?.id as string | undefined
+    if (!latestAssistantId) return
+
+    const { error: updateError } = await supabase
+      .from('messages')
+      .update({ model })
+      .eq('id', latestAssistantId)
+
+    if (updateError) {
+      await supabase
+        .from('messages')
+        .update({ model_used: model })
+        .eq('id', latestAssistantId)
+    }
+
+    setMessagesMap((prev) => ({
+      ...prev,
+      [conversationId]: (prev[conversationId] || []).map((message) =>
+        message.id === latestAssistantId
+          ? { ...message, model, model_used: model }
+          : message,
+      ),
+    }))
+  }
+
   const createConversation = async () => {
     if (!supabase || !session?.user) return null
 
@@ -1264,6 +1884,19 @@ function App() {
     )
   }
 
+  const moveConversationToTop = (conversationId: string) => {
+    setConversations((prev) => {
+      const index = prev.findIndex((item) => item.id === conversationId)
+      if (index <= 0) return prev
+
+      const next = [...prev]
+      const [conversation] = next.splice(index, 1)
+      if (!conversation) return prev
+      next.unshift(conversation)
+      return next
+    })
+  }
+
   const ensureConversation = async () => {
     if (activeConversationId) return activeConversationId
     return createConversation()
@@ -1275,8 +1908,18 @@ function App() {
     const prompt = input.trim()
     if (!prompt || isGenerating) return
 
-    const conversationId = await ensureConversation()
+    let conversationId = await ensureConversation()
     if (!conversationId) return
+    if (!isUuid(conversationId)) {
+      const recoveredConversationId = await createConversation()
+      if (!recoveredConversationId || !isUuid(recoveredConversationId)) {
+        setError('Could not create a valid conversation id.')
+        return
+      }
+      conversationId = recoveredConversationId
+    }
+
+    moveConversationToTop(conversationId)
 
     navigate(`/chat/${slugify(prompt)}?c=${conversationId}`)
 
@@ -1309,6 +1952,7 @@ function App() {
       conversation_id: conversationId,
       role: 'assistant',
       content: '',
+      model: selectedModel,
       created_at: new Date().toISOString(),
     }
 
@@ -1323,13 +1967,17 @@ function App() {
     setGeneratingConversationId(conversationId)
     setIsThinking(true)
     let hasFirstToken = false
+    const endpoint = MODEL_ENDPOINTS[selectedModel]
+    const apiUrl = `${API_BASE}${endpoint}`
 
     try {
       await streamCompletion(
+        apiUrl,
         {
           user_id: session.user.id,
           conversation_id: conversationId,
           messages: [{ role: 'user', content: prompt }],
+          tone: selectedTone,
           temperature: 0.7,
           max_tokens: 512,
           stream: true,
@@ -1366,6 +2014,7 @@ function App() {
       setIsThinking(false)
       abortRef.current = null
       await refreshMessages(conversationId)
+      await persistModelForLatestAssistantMessage(conversationId, selectedModel)
     }
   }
 
@@ -1398,6 +2047,11 @@ function App() {
 
   const onClearChats = async () => {
     if (!supabase || !session?.user) return
+
+    if (confirmClearChats) {
+      const accepted = window.confirm('Clear all chats? This cannot be undone.')
+      if (!accepted) return
+    }
 
     const ids = conversations.map((item) => item.id)
     if (ids.length > 0) {
@@ -1443,7 +2097,22 @@ function App() {
 
   const onSelectConversation = (conversationId: string) => {
     const selected = conversations.find((conv) => conv.id === conversationId)
+    const modelForConversation =
+      (messagesMap[conversationId] || [])
+        .slice()
+        .reverse()
+        .find((message) => message.role === 'assistant' && getMessageModel(message))
+        ?.model ||
+      (messagesMap[conversationId] || [])
+        .slice()
+        .reverse()
+        .find((message) => message.role === 'assistant' && getMessageModel(message))
+        ?.model_used
+    moveConversationToTop(conversationId)
     setActiveConversationId(conversationId)
+    if (isAIModel(modelForConversation)) {
+      setSelectedModel(modelForConversation)
+    }
     refreshPromptCards()
     setSidebarOpen(false)
     navigate(`/chat/${slugify(selected?.title || 'chat')}?c=${conversationId}`)
@@ -1521,10 +2190,14 @@ function App() {
             <ChatWorkspace
               conversations={conversations}
               activeConversationId={activeConversationId}
+              activeConversationModel={activeConversationModel}
               activeMessages={activeMessages}
               promptPurpose={promptPurpose}
               promptCards={promptCards}
               draft={draft}
+              selectedModel={selectedModel}
+              enterToSend={enterToSend}
+              voiceLanguage={voiceLanguage}
               isGenerating={isGenerating}
               generatingConversationId={generatingConversationId}
               error={error}
@@ -1533,6 +2206,7 @@ function App() {
               sidebarOpen={sidebarOpen}
               setSidebarOpen={setSidebarOpen}
               setDraft={setDraft}
+              setSelectedModel={setSelectedModel}
               onSendOrStop={onSendOrStop}
               sendMessage={sendMessage}
               onNewChat={onNewChat}
@@ -1569,7 +2243,13 @@ function App() {
               displayName={displayName}
               responseStyle={responseStyle}
               promptPurpose={promptPurpose}
+              selectedTone={selectedTone}
+              enterToSend={enterToSend}
+              suggestionCount={suggestionCount}
+              voiceLanguage={voiceLanguage}
+              confirmClearChats={confirmClearChats}
               onSavePersonalization={onSavePersonalization}
+              onSaveExperienceSettings={onSaveExperienceSettings}
               onClearChats={onClearChats}
               onLogout={onLogout}
             />

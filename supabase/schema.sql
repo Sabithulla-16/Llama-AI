@@ -12,8 +12,12 @@ create table if not exists public.messages (
   conversation_id uuid not null references public.conversations(id) on delete cascade,
   role text not null check (role in ('user', 'assistant', 'system')),
   content text not null,
+  model text check (model in ('llama', 'qwen', 'coder', 'mini', 'smart')),
   created_at timestamptz not null default now()
 );
+
+alter table public.messages
+  add column if not exists model text check (model in ('llama', 'qwen', 'coder', 'mini', 'smart'));
 
 create index if not exists conversations_user_created_idx
   on public.conversations (user_id, created_at desc);
