@@ -22,6 +22,7 @@ import {
   Mic,
   SendHorizontal,
   Square,
+  ImagePlus,
   LayoutDashboard,
   Trash2,
   LogOut,
@@ -55,25 +56,12 @@ type ResponseStyle = 'balanced' | 'concise' | 'detailed'
 type PromptPurpose = 'general' | 'coding' | 'business' | 'study' | 'writing'
 type AIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart'
 type VoiceLanguage = 'en-US' | 'en-GB' | 'hi-IN'
-type Tone =
-  | 'default'
-  | 'formal'
-  | 'casual'
-  | 'genz'
-  | 'funny'
-  | 'motivational'
-  | 'technical'
-  | 'minimal'
-  | 'detailed'
-  | 'creative'
-  | 'empathetic'
-  | 'business'
-  | 'academic'
 
 const API_BASE =
   ((import.meta.env.VITE_API_BASE_URL as string | undefined) ||
     'https://valtry-llama3-2-3b-quantized.hf.space').replace(/\/+$/, '')
 const STOP_API = `${API_BASE}/v1/stop`
+const IMAGE_STREAM_API = `${API_BASE}/v1/chat/image/stream`
 const MODEL_ENDPOINTS: Record<AIModel, string> = {
   llama: '/v1/chat/llama',
   qwen: '/v1/chat/qwen',
@@ -96,6 +84,8 @@ const MODEL_ENGINE_LABELS: Record<AIModel, string> = {
   smart: 'Smart',
 }
 
+const COMPOSER_MODEL_OPTIONS: AIModel[] = ['llama', 'coder']
+
 const isAIModel = (value: unknown): value is AIModel =>
   typeof value === 'string' && value in MODEL_ENDPOINTS
 
@@ -103,22 +93,6 @@ const getMessageModel = (message: ChatMessage): AIModel | null => {
   const candidate = message.model ?? message.model_used
   return isAIModel(candidate) ? candidate : null
 }
-const TONE_LABELS: Record<Tone, string> = {
-  default: 'Default',
-  formal: 'Formal',
-  casual: 'Casual',
-  genz: 'Gen Z',
-  funny: 'Funny',
-  motivational: 'Motivational',
-  technical: 'Technical',
-  minimal: 'Minimal',
-  detailed: 'Detailed',
-  creative: 'Creative',
-  empathetic: 'Empathetic',
-  business: 'Business',
-  academic: 'Academic',
-}
-
 const PURPOSE_PROMPTS: Record<PromptPurpose, string[]> = {
   general: [
     'Explain AI',
@@ -363,13 +337,13 @@ async function streamCompletion(
     user_id: string
     conversation_id: string
     messages: Pick<ChatMessage, 'role' | 'content'>[]
-    tone: Tone
     temperature?: number
     max_tokens?: number
     stream?: boolean
   },
   signal: AbortSignal,
   onToken: (token: string) => void,
+  onDone?: (meta: { conversation_id?: string }) => void,
 ) {
   const response = await fetch(apiUrl, {
     method: 'POST',
@@ -381,7 +355,6 @@ async function streamCompletion(
       user_id: payload.user_id,
       conversation_id: payload.conversation_id,
       messages: payload.messages,
-      tone: payload.tone,
       temperature: payload.temperature ?? 0.7,
       max_tokens: payload.max_tokens ?? 512,
       stream: payload.stream ?? true,
@@ -397,31 +370,238 @@ async function streamCompletion(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let dataLines: string[] = []
+  let didSignalDone = false
+
+  const signalDone = (meta: { conversation_id?: string }) => {
+    if (didSignalDone) return
+    didSignalDone = true
+    onDone?.(meta)
+  }
+
+  const dispatchEvent = () => {
+    const payloadText = dataLines.join('\n').trim()
+    dataLines = []
+
+    if (!payloadText) return
+    if (payloadText === '[DONE]') {
+      signalDone({})
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(payloadText)
+      if (parsed?.done === true) {
+        signalDone({ conversation_id: parsed?.conversation_id })
+        return
+      }
+
+      const token = parsed?.choices?.[0]?.delta?.content
+      if (typeof token === 'string' && token.length > 0) {
+        onToken(token)
+      }
+    } catch {
+      // Ignore malformed stream chunks from edge providers.
+    }
+  }
 
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      if (buffer.trim()) {
+        const trailing = buffer.endsWith('\n') ? buffer : `${buffer}\n`
+        buffer = trailing
+      }
+    } else {
+      buffer += decoder.decode(value, { stream: true })
+    }
 
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n')
+    const parts = buffer.split(/\r?\n/)
     buffer = parts.pop() || ''
 
     for (const part of parts) {
-      const line = part.trim()
+      const line = part.trimEnd()
+      if (!line) {
+        dispatchEvent()
+        continue
+      }
+
+      if (line.startsWith(':')) continue
+
+      if (line.startsWith('event:')) continue
+
       if (!line.startsWith('data:')) continue
 
-      const payload = line.slice(5).trim()
-      if (!payload || payload === '[DONE]') continue
+      const dataPayload = line.slice(5).trimStart()
+      dataLines.push(dataPayload)
+
+      // React immediately when backend emits done:true on a data line.
+      if (dataPayload && dataPayload !== '[DONE]') {
+        try {
+          const parsedInline = JSON.parse(dataPayload)
+          if (parsedInline?.done === true) {
+            signalDone({ conversation_id: parsedInline?.conversation_id })
+          }
+        } catch {
+          // Ignore partial or non-JSON lines.
+        }
+      }
+    }
+
+    if (done) {
+      if (dataLines.length > 0) {
+        dispatchEvent()
+      }
+      break
+    }
+  }
+}
+
+async function streamImageCompletion(
+  apiUrl: string,
+  payload: {
+    user_id: string
+    conversation_id: string
+    prompt: string
+    file: File
+  },
+  signal: AbortSignal,
+  onToken: (token: string) => void,
+  onVisionDone?: () => void,
+  onDone?: () => void,
+) {
+  const formData = new FormData()
+  formData.append('user_id', payload.user_id)
+  formData.append('conversation_id', payload.conversation_id)
+  formData.append('prompt', payload.prompt)
+  formData.append('file', payload.file)
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      Accept: 'text/event-stream',
+    },
+    body: formData,
+    signal,
+  })
+
+  if (!response.ok || !response.body) {
+    const details = `HTTP ${response.status} ${response.statusText}`.trim()
+    throw new Error(`Could not start image streaming response (${details}) from ${apiUrl}.`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let currentEvent = 'message'
+  let dataLines: string[] = []
+  let didSignalVisionDone = false
+  let didSignalDone = false
+
+  const signalVisionDone = () => {
+    if (didSignalVisionDone) return
+    didSignalVisionDone = true
+    onVisionDone?.()
+  }
+
+  const signalDone = () => {
+    if (didSignalDone) return
+    didSignalDone = true
+    onDone?.()
+  }
+
+  const dispatchEvent = () => {
+    const payloadText = dataLines.join('\n').trim()
+    const eventName = currentEvent
+    currentEvent = 'message'
+    dataLines = []
+
+    if (!payloadText) return
+    if (payloadText === '[DONE]') {
+      signalDone()
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(payloadText)
+
+      if (eventName === 'vision_done' && parsed?.status === 'done') {
+        signalVisionDone()
+        return
+      }
+
+      if (parsed?.done === true) {
+        signalDone()
+        return
+      }
+
+      const token = parsed?.choices?.[0]?.delta?.content
+      if (typeof token === 'string' && token.length > 0) {
+        onToken(token)
+      }
+    } catch {
+      // Ignore malformed stream chunks from edge providers.
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      if (buffer.trim()) {
+        const trailing = buffer.endsWith('\n') ? buffer : `${buffer}\n`
+        buffer = trailing
+      }
+    } else {
+      buffer += decoder.decode(value, { stream: true })
+    }
+
+    const parts = buffer.split(/\r?\n/)
+    buffer = parts.pop() || ''
+
+    for (const part of parts) {
+      const line = part.trimEnd()
+      if (!line) {
+        dispatchEvent()
+        continue
+      }
+
+      if (line.startsWith(':')) continue
+
+      if (line.startsWith('event:')) {
+        currentEvent = line.slice(6).trim() || 'message'
+        continue
+      }
+
+      if (!line.startsWith('data:')) continue
+
+      const dataPayload = line.slice(5).trimStart()
+      dataLines.push(dataPayload)
+
+      if (!dataPayload || dataPayload === '[DONE]') {
+        if (dataPayload === '[DONE]') {
+          signalDone()
+        }
+        continue
+      }
 
       try {
-        const parsed = JSON.parse(payload)
-        const token = parsed?.choices?.[0]?.delta?.content
-        if (typeof token === 'string' && token.length > 0) {
-          onToken(token)
+        const parsedInline = JSON.parse(dataPayload)
+        if (currentEvent === 'vision_done' && parsedInline?.status === 'done') {
+          signalVisionDone()
+        }
+        if (parsedInline?.done === true) {
+          signalDone()
         }
       } catch {
-        // Ignore malformed stream chunks from edge providers.
+        // Ignore partial or non-JSON lines.
       }
+    }
+
+    if (done) {
+      if (dataLines.length > 0) {
+        dispatchEvent()
+      }
+      break
     }
   }
 }
@@ -653,6 +833,7 @@ type ChatWorkspaceProps = {
   selectedModel: AIModel
   enterToSend: boolean
   voiceLanguage: VoiceLanguage
+  isAnalyzingImage: boolean
   isGenerating: boolean
   generatingConversationId: string | null
   error: string
@@ -662,8 +843,8 @@ type ChatWorkspaceProps = {
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   setDraft: React.Dispatch<React.SetStateAction<string>>
   setSelectedModel: React.Dispatch<React.SetStateAction<AIModel>>
-  onSendOrStop: () => Promise<void>
-  sendMessage: (input: string) => Promise<void>
+  onSendOrStop: (input: string, imageFile?: File | null, imageDataUrl?: string | null) => Promise<void>
+  sendMessage: (input: string, imageFile?: File | null, imageDataUrl?: string | null) => Promise<void>
   onNewChat: () => Promise<void>
   onShareMessage: (content: string) => Promise<void>
   onShareConversation: (conversationId: string) => Promise<void>
@@ -672,6 +853,7 @@ type ChatWorkspaceProps = {
   onCancelDeleteConversation: () => void
   onSelectConversation: (conversationId: string) => void
   endRef: React.RefObject<HTMLDivElement | null>
+  imageDataMap: Record<string, string>
 }
 
 function ChatWorkspace({
@@ -685,6 +867,7 @@ function ChatWorkspace({
   selectedModel,
   enterToSend,
   voiceLanguage,
+  isAnalyzingImage,
   isGenerating,
   generatingConversationId,
   error,
@@ -704,6 +887,7 @@ function ChatWorkspace({
   onCancelDeleteConversation,
   onSelectConversation,
   endRef,
+  imageDataMap,
 }: ChatWorkspaceProps) {
   const navigate = useNavigate()
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -715,6 +899,32 @@ function ChatWorkspace({
   const [readingMessageId, setReadingMessageId] = useState<string | null>(null)
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null)
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
+  const [showImageModal, setShowImageModal] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const clearSelectedImage = () => {
+    setSelectedImageFile(null)
+    setPreviewImageUrl(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleImageSelect = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      clearSelectedImage()
+      return
+    }
+    setSelectedImageFile(file)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string
+      setPreviewImageUrl(dataUrl)
+    }
+    reader.readAsDataURL(file)
+  }
 
   const resizeComposerTextarea = (textarea: HTMLTextAreaElement) => {
     textarea.style.height = 'auto'
@@ -923,7 +1133,10 @@ function ChatWorkspace({
                   <button
                     key={prompt}
                     className="suggestion-card"
-                    onClick={() => void sendMessage(prompt)}
+                    onClick={() => {
+                      void sendMessage(prompt, selectedImageFile)
+                      clearSelectedImage()
+                    }}
                   >
                     {prompt}
                   </button>
@@ -951,12 +1164,25 @@ function ChatWorkspace({
                     }`}
                   >
                     <div className={`bubble ${message.role}`}>
+                      {message.role === 'user' && message.content.includes('[Image:') && imageDataMap[message.id] && (
+                        <div className="message-image-container">
+                          <img
+                            src={imageDataMap[message.id]}
+                            alt="Uploaded image"
+                            className="message-image"
+                            onClick={() => {
+                              setPreviewImageUrl(imageDataMap[message.id])
+                              setShowImageModal(true)
+                            }}
+                          />
+                        </div>
+                      )}
                       {isPendingAssistant ? (
                         <div className="thinking-inline">
                           <span className="thinking-dot"></span>
                           <span className="thinking-dot"></span>
                           <span className="thinking-dot"></span>
-                          <p>Thinking...</p>
+                          <p>{isAnalyzingImage ? 'Analyzing image...' : 'Thinking...'}</p>
                         </div>
                       ) : message.role === 'assistant' ? (
                         <>
@@ -1019,7 +1245,11 @@ function ChatWorkspace({
                           </div>
                         </>
                       ) : (
-                        <p>{message.content}</p>
+                        <p>
+                          {message.content
+                            .replace(/\[Image: [^\]]+\]/g, '')
+                            .trim() || (message.content.includes('[Image:') ? 'Image sent' : message.content)}
+                        </p>
                       )}
                     </div>
                   </article>
@@ -1036,7 +1266,7 @@ function ChatWorkspace({
           <div className="composer-options">
             <CustomDropdown
               value={selectedModel}
-              options={(Object.keys(MODEL_LABELS) as AIModel[]).map((model) => ({
+              options={COMPOSER_MODEL_OPTIONS.map((model) => ({
                 value: model,
                 label: MODEL_LABELS[model],
               }))}
@@ -1044,6 +1274,26 @@ function ChatWorkspace({
             />
           </div>
           <div className="composer">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="image-file-input"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (!file) return
+                handleImageSelect(file)
+              }}
+            />
+            <button
+              type="button"
+              className="image-upload-trigger"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isGenerating}
+              title={selectedImageFile ? 'Change image' : 'Upload image'}
+            >
+              <ImagePlus size={20} />
+            </button>
             <textarea
               ref={composerTextareaRef}
               value={draft}
@@ -1067,10 +1317,26 @@ function ChatWorkspace({
                   ) {
                     return
                   }
-                  void onSendOrStop()
+                  void onSendOrStop(draft, selectedImageFile, previewImageUrl)
+                  clearSelectedImage()
                 }
               }}
             />
+            {showImageModal && previewImageUrl && (
+              <div className="image-modal-overlay" onClick={() => setShowImageModal(false)}>
+                <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="image-modal-close"
+                    onClick={() => setShowImageModal(false)}
+                    title="Close preview"
+                  >
+                    <X size={24} />
+                  </button>
+                  <img src={previewImageUrl} alt="Image preview" className="image-modal-img" />
+                </div>
+              </div>
+            )}
             <div className="composer-actions">
               <button
                 type="button"
@@ -1095,7 +1361,8 @@ function ChatWorkspace({
                   if (isGenerating && activeConversationId !== generatingConversationId) {
                     return
                   }
-                  void onSendOrStop()
+                  void onSendOrStop(draft, selectedImageFile, previewImageUrl)
+                  clearSelectedImage()
                 }}
                 disabled={isGenerating && activeConversationId !== generatingConversationId}
                 aria-label={isStopState ? 'Stop generation' : 'Send message'}
@@ -1147,7 +1414,6 @@ type DashboardProps = {
   displayName: string
   responseStyle: ResponseStyle
   promptPurpose: PromptPurpose
-  selectedTone: Tone
   enterToSend: boolean
   suggestionCount: 4 | 6
   voiceLanguage: VoiceLanguage
@@ -1156,7 +1422,6 @@ type DashboardProps = {
     name: string,
     style: ResponseStyle,
     purpose: PromptPurpose,
-    tone: Tone,
   ) => void
   onSaveExperienceSettings: (
     enterToSend: boolean,
@@ -1179,7 +1444,6 @@ function Dashboard({
   displayName,
   responseStyle,
   promptPurpose,
-  selectedTone,
   enterToSend,
   suggestionCount,
   voiceLanguage,
@@ -1193,7 +1457,6 @@ function Dashboard({
   const [nameDraft, setNameDraft] = useState(displayName)
   const [styleDraft, setStyleDraft] = useState<ResponseStyle>(responseStyle)
   const [purposeDraft, setPurposeDraft] = useState<PromptPurpose>(promptPurpose)
-  const [toneDraft, setToneDraft] = useState<Tone>(selectedTone)
   const [enterToSendDraft, setEnterToSendDraft] = useState(enterToSend)
   const [suggestionCountDraft, setSuggestionCountDraft] = useState<4 | 6>(suggestionCount)
   const [voiceLanguageDraft, setVoiceLanguageDraft] = useState<VoiceLanguage>(voiceLanguage)
@@ -1203,7 +1466,6 @@ function Dashboard({
     setNameDraft(displayName)
     setStyleDraft(responseStyle)
     setPurposeDraft(promptPurpose)
-    setToneDraft(selectedTone)
     setEnterToSendDraft(enterToSend)
     setSuggestionCountDraft(suggestionCount)
     setVoiceLanguageDraft(voiceLanguage)
@@ -1212,7 +1474,6 @@ function Dashboard({
     displayName,
     responseStyle,
     promptPurpose,
-    selectedTone,
     enterToSend,
     suggestionCount,
     voiceLanguage,
@@ -1309,23 +1570,12 @@ function Dashboard({
               />
             </label>
 
-            <label className="field-block">
-              Tone
-              <CustomDropdown
-                value={toneDraft}
-                options={(Object.keys(TONE_LABELS) as Tone[]).map((tone) => ({
-                  value: tone,
-                  label: TONE_LABELS[tone],
-                }))}
-                onChange={setToneDraft}
-              />
-            </label>
           </div>
 
           <button
             className="secondary-button"
             onClick={() =>
-              onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft, toneDraft)
+              onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft)
             }
           >
             Save Preferences
@@ -1440,9 +1690,9 @@ function App() {
   )
   const [draft, setDraft] = useState('')
   const [selectedModel, setSelectedModel] = useState<AIModel>('llama')
-  const [selectedTone, setSelectedTone] = useState<Tone>('default')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null)
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
   const [isThinking, setIsThinking] = useState(false)
   const [streamTick, setStreamTick] = useState(0)
   const [error, setError] = useState('')
@@ -1455,6 +1705,7 @@ function App() {
   const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('en-US')
   const [suggestionCount, setSuggestionCount] = useState<4 | 6>(4)
   const [confirmClearChats, setConfirmClearChats] = useState(true)
+  const [imageDataMap, setImageDataMap] = useState<Record<string, string>>({})
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -1519,7 +1770,6 @@ function App() {
     name: string,
     style: ResponseStyle,
     purpose: PromptPurpose,
-    tone: Tone,
   ) => {
     if (!session?.user) return
 
@@ -1527,11 +1777,9 @@ function App() {
     setDisplayName(safeName)
     setResponseStyle(style)
     setPromptPurpose(purpose)
-    setSelectedTone(tone)
     localStorage.setItem(`display-name:${session.user.id}`, safeName)
     localStorage.setItem(`response-style:${session.user.id}`, style)
     localStorage.setItem(`prompt-purpose:${session.user.id}`, purpose)
-    localStorage.setItem(`selected-tone:${session.user.id}`, tone)
     setPromptCards(pickRandomPrompts(purpose, suggestionCount))
     showNotice('Preferences saved.')
   }
@@ -1606,7 +1854,6 @@ function App() {
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
     const storedStyle = localStorage.getItem(`response-style:${keyPrefix}`)
     const storedPurpose = localStorage.getItem(`prompt-purpose:${keyPrefix}`)
-    const storedTone = localStorage.getItem(`selected-tone:${keyPrefix}`)
     const storedEnterToSend = localStorage.getItem(`enter-to-send:${keyPrefix}`)
     const storedSuggestionCount = localStorage.getItem(`suggestion-count:${keyPrefix}`)
     const storedVoiceLanguage = localStorage.getItem(`voice-language:${keyPrefix}`)
@@ -1635,15 +1882,6 @@ function App() {
         ? storedPurpose
         : 'general'
 
-    const validTones: Tone[] = [
-      'default', 'formal', 'casual', 'genz', 'funny', 'motivational',
-      'technical', 'minimal', 'detailed', 'creative', 'empathetic',
-      'business', 'academic',
-    ]
-    const resolvedTone: Tone = validTones.includes(storedTone as Tone)
-      ? (storedTone as Tone)
-      : 'default'
-
     const resolvedSuggestionCount: 4 | 6 = storedSuggestionCount === '6' ? 6 : 4
     const resolvedVoiceLanguage: VoiceLanguage =
       storedVoiceLanguage === 'en-GB' || storedVoiceLanguage === 'hi-IN'
@@ -1651,7 +1889,6 @@ function App() {
         : 'en-US'
 
     setPromptPurpose(resolvedPurpose)
-    setSelectedTone(resolvedTone)
     setEnterToSend(storedEnterToSend !== 'false')
     setSuggestionCount(resolvedSuggestionCount)
     setVoiceLanguage(resolvedVoiceLanguage)
@@ -1780,7 +2017,10 @@ function App() {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [activeMessages.length, isGenerating, streamTick, isThinking])
 
-  const refreshMessages = async (conversationId: string) => {
+  const refreshMessages = async (
+    conversationId: string,
+    preserveStreamedMessages = false,
+  ) => {
     if (!supabase) return
 
     const { data, error: loadError } = await supabase
@@ -1794,10 +2034,45 @@ function App() {
       return
     }
 
-    setMessagesMap((prev) => ({
-      ...prev,
-      [conversationId]: (data || []) as ChatMessage[],
-    }))
+    const fetchedMessages = (data || []) as ChatMessage[]
+    let skippedUpdate = false
+
+    setMessagesMap((prev) => {
+      const currentMessages = prev[conversationId] || []
+
+      if (preserveStreamedMessages) {
+        const currentHasAssistantContent = currentMessages.some(
+          (message) =>
+            message.role === 'assistant' && message.content.trim().length > 0,
+        )
+        const fetchedHasAssistantContent = fetchedMessages.some(
+          (message) =>
+            message.role === 'assistant' && message.content.trim().length > 0,
+        )
+
+        // Avoid wiping a just-streamed answer when DB replication is a beat behind.
+        if (
+          currentHasAssistantContent &&
+          (!fetchedHasAssistantContent || fetchedMessages.length < currentMessages.length)
+        ) {
+          skippedUpdate = true
+          return prev
+        }
+      }
+
+      return {
+        ...prev,
+        [conversationId]: fetchedMessages,
+      }
+    })
+
+    if (skippedUpdate) {
+      window.setTimeout(() => {
+        void refreshMessages(conversationId)
+      }, 450)
+    }
+
+    return fetchedMessages
   }
 
   const persistModelForLatestAssistantMessage = async (
@@ -1902,11 +2177,12 @@ function App() {
     return createConversation()
   }
 
-  const sendMessage = async (input: string) => {
+  const sendMessage = async (input: string, imageFile?: File | null, imageDataUrl?: string | null) => {
     if (!supabase || !session?.user) return
 
     const prompt = input.trim()
-    if (!prompt || isGenerating) return
+    if ((!prompt && !imageFile) || isGenerating) return
+    const promptForRequest = prompt || 'Analyze this image'
 
     let conversationId = await ensureConversation()
     if (!conversationId) return
@@ -1921,14 +2197,29 @@ function App() {
 
     moveConversationToTop(conversationId)
 
-    navigate(`/chat/${slugify(prompt)}?c=${conversationId}`)
+    navigate(`/chat/${slugify(promptForRequest)}?c=${conversationId}`)
 
+    const userContent = imageFile
+      ? prompt
+        ? `${prompt}\n\n[Image: ${imageFile.name}]`
+        : `[Image: ${imageFile.name}]`
+      : prompt
+
+    const userId = safeId('user')
     const userMessage: ChatMessage = {
-      id: safeId('user'),
+      id: userId,
       conversation_id: conversationId,
       role: 'user',
-      content: prompt,
+      content: userContent,
       created_at: new Date().toISOString(),
+    }
+
+    // Store image data URL for persistence in conversation
+    if (imageFile && imageDataUrl) {
+      setImageDataMap((prev) => ({
+        ...prev,
+        [userId]: imageDataUrl,
+      }))
     }
 
     setError('')
@@ -1936,7 +2227,7 @@ function App() {
 
     const isFirstMessage = (messagesMap[conversationId] || []).length === 0
     if (isFirstMessage) {
-      void updateConversationTitle(conversationId, deriveTitle(prompt))
+      void updateConversationTitle(conversationId, deriveTitle(promptForRequest))
     }
 
     setMessagesMap((prev) => ({
@@ -1965,41 +2256,90 @@ function App() {
     abortRef.current = controller
     setIsGenerating(true)
     setGeneratingConversationId(conversationId)
-    setIsThinking(true)
+    setIsAnalyzingImage(Boolean(imageFile))
+    setIsThinking(!imageFile)
     let hasFirstToken = false
-    const endpoint = MODEL_ENDPOINTS[selectedModel]
-    const apiUrl = `${API_BASE}${endpoint}`
+    let hasVisionDone = false
 
     try {
-      await streamCompletion(
-        apiUrl,
-        {
-          user_id: session.user.id,
-          conversation_id: conversationId,
-          messages: [{ role: 'user', content: prompt }],
-          tone: selectedTone,
-          temperature: 0.7,
-          max_tokens: 512,
-          stream: true,
-        },
-        controller.signal,
-        (token) => {
-          if (!hasFirstToken) {
-            hasFirstToken = true
+      if (imageFile) {
+        await streamImageCompletion(
+          IMAGE_STREAM_API,
+          {
+            user_id: session.user.id,
+            conversation_id: conversationId,
+            prompt: promptForRequest,
+            file: imageFile,
+          },
+          controller.signal,
+          (token) => {
+            if (!hasFirstToken) {
+              hasFirstToken = true
+              setIsThinking(false)
+            }
+            assistantBuffer += token
+            setStreamTick((prev) => prev + 1)
+            setMessagesMap((prev) => ({
+              ...prev,
+              [conversationId]: (prev[conversationId] || []).map((message) =>
+                message.id === assistantId
+                  ? { ...message, content: cleanAssistantOutput(assistantBuffer) }
+                  : message,
+              ),
+            }))
+          },
+          () => {
+            if (hasVisionDone) return
+            hasVisionDone = true
+            setIsAnalyzingImage(false)
+            setIsThinking(true)
+          },
+          () => {
+            setIsGenerating(false)
+            setGeneratingConversationId(null)
+            setIsAnalyzingImage(false)
             setIsThinking(false)
-          }
-          assistantBuffer += token
-          setStreamTick((prev) => prev + 1)
-          setMessagesMap((prev) => ({
-            ...prev,
-            [conversationId]: (prev[conversationId] || []).map((message) =>
-              message.id === assistantId
-                ? { ...message, content: cleanAssistantOutput(assistantBuffer) }
-                : message,
-            ),
-          }))
-        },
-      )
+          },
+        )
+      } else {
+        const endpoint = MODEL_ENDPOINTS[selectedModel]
+        const apiUrl = `${API_BASE}${endpoint}`
+        await streamCompletion(
+          apiUrl,
+          {
+            user_id: session.user.id,
+            conversation_id: conversationId,
+            messages: [{ role: 'user', content: promptForRequest }],
+            temperature: 0.7,
+            max_tokens: 512,
+            stream: true,
+          },
+          controller.signal,
+          (token) => {
+            if (!hasFirstToken) {
+              hasFirstToken = true
+              setIsThinking(false)
+            }
+            assistantBuffer += token
+            setStreamTick((prev) => prev + 1)
+            setMessagesMap((prev) => ({
+              ...prev,
+              [conversationId]: (prev[conversationId] || []).map((message) =>
+                message.id === assistantId
+                  ? { ...message, content: cleanAssistantOutput(assistantBuffer) }
+                  : message,
+              ),
+            }))
+          },
+          (meta) => {
+            if (meta.conversation_id && meta.conversation_id !== conversationId) return
+            setIsGenerating(false)
+            setGeneratingConversationId(null)
+            setIsAnalyzingImage(false)
+            setIsThinking(false)
+          },
+        )
+      }
     } catch (streamError) {
       if (!(streamError instanceof DOMException && streamError.name === 'AbortError')) {
         setError(
@@ -2011,14 +2351,15 @@ function App() {
     } finally {
       setIsGenerating(false)
       setGeneratingConversationId(null)
+      setIsAnalyzingImage(false)
       setIsThinking(false)
       abortRef.current = null
-      await refreshMessages(conversationId)
+      await refreshMessages(conversationId, true)
       await persistModelForLatestAssistantMessage(conversationId, selectedModel)
     }
   }
 
-  const onSendOrStop = async () => {
+  const onSendOrStop = async (input: string, imageFile?: File | null, imageDataUrl?: string | null) => {
     if (isGenerating) {
       const conversationId = generatingConversationId
       abortRef.current?.abort()
@@ -2036,7 +2377,7 @@ function App() {
       return
     }
 
-    await sendMessage(draft)
+    await sendMessage(input, imageFile, imageDataUrl)
   }
 
   const onNewChat = async () => {
@@ -2198,6 +2539,7 @@ function App() {
               selectedModel={selectedModel}
               enterToSend={enterToSend}
               voiceLanguage={voiceLanguage}
+              isAnalyzingImage={isAnalyzingImage}
               isGenerating={isGenerating}
               generatingConversationId={generatingConversationId}
               error={error}
@@ -2217,6 +2559,7 @@ function App() {
               onCancelDeleteConversation={onCancelDeleteConversation}
               onSelectConversation={onSelectConversation}
               endRef={endRef}
+              imageDataMap={imageDataMap}
             />
           )
         }
@@ -2243,7 +2586,6 @@ function App() {
               displayName={displayName}
               responseStyle={responseStyle}
               promptPurpose={promptPurpose}
-              selectedTone={selectedTone}
               enterToSend={enterToSend}
               suggestionCount={suggestionCount}
               voiceLanguage={voiceLanguage}

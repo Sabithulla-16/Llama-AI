@@ -738,6 +738,121 @@ textarea:focus {
   margin-bottom: 8px;
 }
 
+.image-file-input {
+  display: none;
+}
+
+.image-upload-trigger {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 200ms ease;
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 8px;
+}
+
+.image-upload-trigger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand) 20%, var(--surface));
+  border-color: var(--brand);
+}
+
+.image-upload-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.image-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 150ms ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.image-modal-content {
+  position: relative;
+  background: var(--surface);
+  border-radius: 12px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.image-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  transition: background 200ms ease;
+  padding: 0;
+  z-index: 1001;
+}
+
+.image-modal-close:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.image-modal-img {
+  max-width: 100%;
+  max-height: 90vh;
+  object-fit: contain;
+  display: block;
+}
+
+.message-image-container {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.message-image {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.message-image:hover {
+  filter: brightness(1.05);
+  transform: scale(1.02);
+}
+
 .model-dropdown {
   position: relative;
 }
@@ -799,8 +914,8 @@ textarea:focus {
   border-radius: 16px;
   background: var(--surface);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: flex-end;
   gap: 10px;
   padding: 10px;
   overflow: hidden;
