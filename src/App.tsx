@@ -1,30 +1,66 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { createClient } from '@supabase/supabase-js'
 import type { Session } from '@supabase/supabase-js'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import type { IconType } from 'react-icons'
+import {
+  SiC,
+  SiCss,
+  SiDotnet,
+  SiGo,
+  SiGnubash,
+  SiHtml5,
+  SiJavascript,
+  SiJson,
+  SiKotlin,
+  SiLess,
+  SiMarkdown,
+  SiOpenjdk,
+  SiPhp,
+  SiPostgresql,
+  SiPython,
+  SiRuby,
+  SiRust,
+  SiSass,
+  SiSwift,
+  SiTypescript,
+  SiYaml,
+} from 'react-icons/si'
 import {
   Navigate,
   Route,
   Routes,
   useLocation,
   useNavigate,
+  useParams,
 } from 'react-router-dom'
 import {
   Menu,
   MessageSquarePlus,
+  Cpu,
+  Check,
+  Loader2,
+  Play,
+  Pause,
   Copy,
   Share2,
+  Download,
+  Eye,
+  EyeOff,
+  RotateCcw,
   ChevronDown,
+  ChevronUp,
   Mic,
   SendHorizontal,
   Square,
   ImagePlus,
   LayoutDashboard,
   Trash2,
+  LogIn,
   LogOut,
   Sun,
   Moon,
@@ -38,6 +74,8 @@ type Conversation = {
   id: string
   user_id: string
   title: string
+  is_shared?: boolean | null
+  share_token?: string | null
   created_at: string
 }
 
@@ -55,7 +93,17 @@ type ThemeMode = 'light' | 'dark'
 type ResponseStyle = 'balanced' | 'concise' | 'detailed'
 type PromptPurpose = 'general' | 'coding' | 'business' | 'study' | 'writing'
 type AIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart'
-type VoiceLanguage = 'en-US' | 'en-GB' | 'hi-IN'
+type VoiceLanguage = 'en-US' | 'en-GB'
+type GenerationOptions = {
+  isRegenerate?: boolean
+  replaceAssistantMessageId?: string
+  replaceAssistantCreatedAt?: string
+  replaceAssistantContent?: string
+  overrideModel?: AIModel
+  anchorMessageId?: string
+  originalPromptMessageId?: string
+  regeneratePromptContent?: string
+}
 
 const API_BASE =
   ((import.meta.env.VITE_API_BASE_URL as string | undefined) ||
@@ -153,7 +201,32 @@ const RESPONSE_STYLE_LABELS: Record<ResponseStyle, string> = {
 const VOICE_LANGUAGE_LABELS: Record<VoiceLanguage, string> = {
   'en-US': 'English (US)',
   'en-GB': 'English (UK)',
-  'hi-IN': 'Hindi',
+}
+
+const voicePrimaryTag = (language: string) => language.toLowerCase().split('-')[0] || ''
+
+const matchesVoiceLanguage = (voiceLang: string, selectedLanguage: VoiceLanguage) => {
+  const voice = voiceLang.toLowerCase()
+  const selected = selectedLanguage.toLowerCase()
+  const primary = voicePrimaryTag(voice)
+  return (
+    voice === selected ||
+    primary === voicePrimaryTag(selected) ||
+    primary === 'en'
+  )
+}
+
+const formatVoiceDisplayName = (rawName: string) => {
+  let name = rawName.trim()
+  name = name.replace(/^(microsoft|google|apple|samsung|amazon)\s+/i, '')
+  if (name.includes(' - ')) {
+    name = name.split(' - ')[0]?.trim() || name
+  }
+  name = name.replace(/multilingual/gi, ' ')
+  name = name.replace(/online/gi, ' ')
+  name = name.replace(/\s*\([^)]*\)\s*$/, '').trim()
+  name = name.replace(/\s{2,}/g, ' ').trim()
+  return name || rawName
 }
 
 type DropdownOption<T extends string> = {
@@ -262,6 +335,128 @@ function CustomDropdown<T extends string>({
   )
 }
 
+type VoiceDropdownProps = {
+  value: string
+  options: DropdownOption<string>[]
+  onChange: (value: string) => void
+  onPreview: (value: string) => void
+  previewingValue: string | null
+  triggerClassName?: string
+  menuClassName?: string
+}
+
+function VoiceDropdown({
+  value,
+  options,
+  onChange,
+  onPreview,
+  previewingValue,
+  triggerClassName = 'composer-select model-select-trigger',
+  menuClassName = 'model-select-menu',
+}: VoiceDropdownProps) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [isOpen, setIsOpen] = useState(false)
+  const [menuDirection, setMenuDirection] = useState<'up' | 'down'>('down')
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!isOpen) return
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setIsOpen(false)
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isOpen])
+
+  const toggleMenu = () => {
+    if (!isOpen) {
+      const trigger = triggerRef.current
+      if (trigger) {
+        const rect = trigger.getBoundingClientRect()
+        const spaceBelow = window.innerHeight - rect.bottom
+        const spaceAbove = rect.top
+        setMenuDirection(spaceBelow < 220 && spaceAbove > spaceBelow ? 'up' : 'down')
+      }
+    }
+    setIsOpen((prev) => !prev)
+  }
+
+  const selectedOption =
+    options.find((option) => option.value === value) || options[0]
+
+  return (
+    <div className="model-dropdown">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={triggerClassName}
+        onClick={toggleMenu}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span>{selectedOption?.label || ''}</span>
+        <ChevronDown size={16} />
+      </button>
+      {isOpen && (
+        <div
+          ref={menuRef}
+          className={`${menuClassName} ${menuDirection}`}
+          role="listbox"
+        >
+          {options.map((option) => {
+            const isPreviewing = previewingValue === option.value
+            return (
+              <div
+                key={option.value}
+                className={`voice-select-option ${value === option.value ? 'active' : ''}`}
+              >
+                <button
+                  type="button"
+                  className="voice-select-choice"
+                  onClick={() => {
+                    onChange(option.value)
+                    setIsOpen(false)
+                  }}
+                  role="option"
+                  aria-selected={value === option.value}
+                >
+                  {option.label}
+                </button>
+                <button
+                  type="button"
+                  className={`voice-preview-button ${isPreviewing ? 'playing' : ''}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onPreview(option.value)
+                  }}
+                  title={isPreviewing ? 'Pause preview' : 'Play preview'}
+                  aria-label={isPreviewing ? 'Pause preview' : 'Play preview'}
+                >
+                  {isPreviewing ? <Pause size={14} /> : <Play size={14} />}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function pickRandomPrompts(purpose: PromptPurpose, count = 4) {
   const pool = PURPOSE_PROMPTS[purpose] || PURPOSE_PROMPTS.general
   const shuffled = [...pool].sort(() => Math.random() - 0.5)
@@ -278,6 +473,10 @@ const supabase =
 
 function safeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`
+}
+
+function createShareToken() {
+  return crypto.randomUUID().replace(/-/g, '')
 }
 
 function cleanAssistantOutput(raw: string) {
@@ -307,6 +506,70 @@ function cleanAssistantOutput(raw: string) {
   const cleaned = cleanedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 
   return cleaned
+}
+
+function getImageTagValue(content: string) {
+  const match = content.match(/\[Image:\s*([^\]]+)\]/i)
+  return match?.[1]?.trim().toLowerCase() || null
+}
+
+function getPromptSignatureValue(content: string) {
+  return content.replace(/\[Image:\s*[^\]]+\]/gi, '').trim().toLowerCase()
+}
+
+function mapImageDataToFetchedMessageIds(
+  previousMessages: ChatMessage[],
+  fetchedMessages: ChatMessage[],
+  imageDataMap: Record<string, string>,
+) {
+  const sourceByTag = new Map<string, string[]>()
+
+  previousMessages.forEach((message) => {
+    if (message.role !== 'user') return
+    const tag = getImageTagValue(message.content)
+    const dataUrl = imageDataMap[message.id]
+    if (!tag || !dataUrl) return
+
+    const queue = sourceByTag.get(tag) || []
+    queue.push(dataUrl)
+    sourceByTag.set(tag, queue)
+  })
+
+  const mapped: Record<string, string> = {}
+
+  fetchedMessages.forEach((message) => {
+    if (message.role !== 'user') return
+    if (imageDataMap[message.id]) return
+
+    const tag = getImageTagValue(message.content)
+    if (!tag) return
+
+    const queue = sourceByTag.get(tag)
+    if (!queue || queue.length === 0) return
+
+    const dataUrl = queue.shift()
+    if (dataUrl) {
+      mapped[message.id] = dataUrl
+    }
+  })
+
+  return mapped
+}
+
+function resolveImageFromPromptSignature(
+  message: ChatMessage,
+  imagePromptDataMap: Record<string, string[]>,
+  promptImageCursor: Record<string, number>,
+) {
+  const promptSignature = getPromptSignatureValue(message.content)
+  const mapKey = `${message.conversation_id}::${promptSignature}`
+  const candidates = imagePromptDataMap[mapKey]
+  if (!candidates || candidates.length === 0) return undefined
+
+  const cursor = promptImageCursor[mapKey] || 0
+  const source = candidates[cursor]
+  promptImageCursor[mapKey] = cursor + 1
+  return source
 }
 
 function deriveTitle(text: string) {
@@ -608,14 +871,205 @@ async function streamImageCompletion(
 
 function CopyableCodeBlock({
   language,
+  meta,
   children,
 }: {
   language?: string
+  meta?: string
   children: string
 }) {
   const textContent = children.replace(/\n$/, '')
-  const label = language || 'code'
+  const lines = textContent.split('\n')
+  const totalLines = lines.length
+  const MAX_COLLAPSED_LINES = 24
+
+  const parseMeta = (rawMeta?: string) => {
+    const text = (rawMeta || '').trim()
+    const fileMatch =
+      text.match(/(?:file|filename|title)=\"([^\"]+)\"/i) ||
+      text.match(/(?:file|filename|title)=([^\s]+)/i)
+
+    const braceLines = text.match(/\{([^}]+)\}/)
+    const hlLines =
+      text.match(/hl_lines=\"([^\"]+)\"/i) ||
+      text.match(/highlight=\"([^\"]+)\"/i)
+
+    const lineSpec = braceLines?.[1] || hlLines?.[1] || ''
+    const highlightSet = new Set<number>()
+
+    lineSpec
+      .split(/[\s,]+/)
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .forEach((token) => {
+        const range = token.match(/^(\d+)-(\d+)$/)
+        if (range) {
+          const start = Number(range[1])
+          const end = Number(range[2])
+          if (Number.isFinite(start) && Number.isFinite(end) && start > 0 && end >= start) {
+            for (let i = start; i <= end; i += 1) highlightSet.add(i)
+          }
+          return
+        }
+
+        const single = Number(token)
+        if (Number.isFinite(single) && single > 0) highlightSet.add(single)
+      })
+
+    return {
+      fileName: fileMatch?.[1],
+      highlightSet,
+    }
+  }
+
+  const getLanguageFileExtension = (rawLanguage?: string) => {
+    const normalized = (rawLanguage || '').toLowerCase()
+    if (['ts', 'tsx', 'typescript'].includes(normalized)) return 'ts'
+    if (['js', 'jsx', 'javascript'].includes(normalized)) return 'js'
+    if (['py', 'python'].includes(normalized)) return 'py'
+    if (['java'].includes(normalized)) return 'java'
+    if (['c'].includes(normalized)) return 'c'
+    if (['cpp', 'c++', 'cc', 'cxx'].includes(normalized)) return 'cpp'
+    if (['cs', 'csharp'].includes(normalized)) return 'cs'
+    if (['go', 'golang'].includes(normalized)) return 'go'
+    if (['rust', 'rs'].includes(normalized)) return 'rs'
+    if (['php'].includes(normalized)) return 'php'
+    if (['rb', 'ruby'].includes(normalized)) return 'rb'
+    if (['swift'].includes(normalized)) return 'swift'
+    if (['kt', 'kotlin'].includes(normalized)) return 'kt'
+    if (['sql', 'postgres', 'postgresql', 'plsql'].includes(normalized)) return 'sql'
+    if (['json'].includes(normalized)) return 'json'
+    if (['html'].includes(normalized)) return 'html'
+    if (['css'].includes(normalized)) return 'css'
+    if (['scss', 'sass'].includes(normalized)) return 'scss'
+    if (['less'].includes(normalized)) return 'less'
+    if (['bash', 'shell', 'sh', 'zsh'].includes(normalized)) return 'sh'
+    if (['yaml', 'yml'].includes(normalized)) return 'yml'
+    if (['markdown', 'md'].includes(normalized)) return 'md'
+    return 'txt'
+  }
+
+  const getCommonFileName = (rawLanguage?: string) => {
+    const normalized = (rawLanguage || '').toLowerCase()
+    if (['ts', 'tsx', 'typescript'].includes(normalized)) return 'index.ts'
+    if (['js', 'jsx', 'javascript'].includes(normalized)) return 'index.js'
+    if (['py', 'python'].includes(normalized)) return 'main.py'
+    if (['java'].includes(normalized)) return 'Main.java'
+    if (['c'].includes(normalized)) return 'main.c'
+    if (['cpp', 'c++', 'cc', 'cxx'].includes(normalized)) return 'main.cpp'
+    if (['cs', 'csharp'].includes(normalized)) return 'Program.cs'
+    if (['go', 'golang'].includes(normalized)) return 'main.go'
+    if (['rust', 'rs'].includes(normalized)) return 'main.rs'
+    if (['php'].includes(normalized)) return 'index.php'
+    if (['rb', 'ruby'].includes(normalized)) return 'main.rb'
+    if (['swift'].includes(normalized)) return 'main.swift'
+    if (['kt', 'kotlin'].includes(normalized)) return 'Main.kt'
+    if (['sql', 'postgres', 'postgresql', 'plsql'].includes(normalized)) return 'query.sql'
+    if (['json'].includes(normalized)) return 'data.json'
+    if (['html'].includes(normalized)) return 'index.html'
+    if (['css'].includes(normalized)) return 'styles.css'
+    if (['scss', 'sass'].includes(normalized)) return 'styles.scss'
+    if (['less'].includes(normalized)) return 'styles.less'
+    if (['bash', 'shell', 'sh', 'zsh'].includes(normalized)) return 'script.sh'
+    if (['yaml', 'yml'].includes(normalized)) return 'config.yml'
+    if (['markdown', 'md'].includes(normalized)) return 'README.md'
+    return `snippet.${getLanguageFileExtension(rawLanguage)}`
+  }
+  const getLanguageBadgeMeta = (
+    rawLanguage?: string,
+  ): { label: string; icon?: IconType; color: string; fallback: string } => {
+    const normalized = (rawLanguage || 'code').toLowerCase()
+
+    if (['ts', 'tsx', 'typescript'].includes(normalized)) {
+      return { label: 'TypeScript', icon: SiTypescript, color: '#3178c6', fallback: 'TS' }
+    }
+    if (['js', 'jsx', 'javascript'].includes(normalized)) {
+      return { label: 'JavaScript', icon: SiJavascript, color: '#f7df1e', fallback: 'JS' }
+    }
+    if (['py', 'python'].includes(normalized)) {
+      return { label: 'Python', icon: SiPython, color: '#3776ab', fallback: 'PY' }
+    }
+    if (['java'].includes(normalized)) {
+      return { label: 'Java', icon: SiOpenjdk, color: '#ea2d2e', fallback: 'JV' }
+    }
+    if (['c'].includes(normalized)) {
+      return { label: 'C', icon: SiC, color: '#a8b9cc', fallback: 'C' }
+    }
+    if (['cpp', 'c++', 'cc', 'cxx'].includes(normalized)) {
+      return { label: 'C++', icon: SiC, color: '#659ad2', fallback: 'C++' }
+    }
+    if (['csharp', 'cs'].includes(normalized)) {
+      return { label: 'C#', icon: SiDotnet, color: '#512bd4', fallback: 'C#' }
+    }
+    if (['go', 'golang'].includes(normalized)) {
+      return { label: 'Go', icon: SiGo, color: '#00add8', fallback: 'GO' }
+    }
+    if (['rust', 'rs'].includes(normalized)) {
+      return { label: 'Rust', icon: SiRust, color: '#dea584', fallback: 'RS' }
+    }
+    if (['php'].includes(normalized)) {
+      return { label: 'PHP', icon: SiPhp, color: '#777bb4', fallback: 'PHP' }
+    }
+    if (['rb', 'ruby'].includes(normalized)) {
+      return { label: 'Ruby', icon: SiRuby, color: '#cc342d', fallback: 'RB' }
+    }
+    if (['swift'].includes(normalized)) {
+      return { label: 'Swift', icon: SiSwift, color: '#f05138', fallback: 'SW' }
+    }
+    if (['kotlin', 'kt'].includes(normalized)) {
+      return { label: 'Kotlin', icon: SiKotlin, color: '#7f52ff', fallback: 'KT' }
+    }
+    if (['sql', 'postgres', 'postgresql', 'plsql'].includes(normalized)) {
+      return { label: 'SQL', icon: SiPostgresql, color: '#336791', fallback: 'SQL' }
+    }
+    if (['json'].includes(normalized)) {
+      return { label: 'JSON', icon: SiJson, color: '#f0b429', fallback: '{}' }
+    }
+    if (['html'].includes(normalized)) {
+      return { label: 'HTML', icon: SiHtml5, color: '#e34f26', fallback: 'HT' }
+    }
+    if (['css'].includes(normalized)) {
+      return { label: 'CSS', icon: SiCss, color: '#1572b6', fallback: 'CS' }
+    }
+    if (['scss', 'sass'].includes(normalized)) {
+      return { label: normalized.toUpperCase(), icon: SiSass, color: '#cc6699', fallback: 'SC' }
+    }
+    if (['less'].includes(normalized)) {
+      return { label: 'LESS', icon: SiLess, color: '#1d365d', fallback: 'LS' }
+    }
+    if (['bash', 'shell', 'sh', 'zsh'].includes(normalized)) {
+      return { label: 'Shell', icon: SiGnubash, color: '#89e051', fallback: '$>' }
+    }
+    if (['yaml', 'yml'].includes(normalized)) {
+      return { label: 'YAML', icon: SiYaml, color: '#cb171e', fallback: 'YM' }
+    }
+    if (['markdown', 'md'].includes(normalized)) {
+      return { label: 'Markdown', icon: SiMarkdown, color: '#8b949e', fallback: 'MD' }
+    }
+
+    return {
+      label: rawLanguage || 'Code',
+      fallback: '</>',
+      color: '#5c6bc0',
+    }
+  }
+
+  const languageMeta = getLanguageBadgeMeta(language)
+  const { fileName: fileNameFromMeta, highlightSet } = parseMeta(meta)
+  const defaultFileName = getCommonFileName(language)
+  const fileName = fileNameFromMeta || defaultFileName
+  const LanguageIcon = languageMeta.icon
+  const showLineNumbers = totalLines > 3
+  const [isExpanded, setIsExpanded] = useState(totalLines <= MAX_COLLAPSED_LINES)
   const [copied, setCopied] = useState(false)
+
+  const isCollapsible = totalLines > MAX_COLLAPSED_LINES
+  const isCollapsed = isCollapsible && !isExpanded
+  const collapsedBodyStyle = isCollapsed
+    ? { maxHeight: `${MAX_COLLAPSED_LINES * 1.55}em`, overflow: 'hidden' }
+    : undefined
+  const hasNestedFencedBlocks =
+    !language && /(^|\n)\s*```[a-zA-Z0-9_-]+/.test(textContent) && /```\s*$/.test(textContent)
 
   const onCopy = async () => {
     await navigator.clipboard.writeText(textContent)
@@ -623,22 +1077,115 @@ function CopyableCodeBlock({
     setTimeout(() => setCopied(false), 1400)
   }
 
+  const onDownload = () => {
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   return (
-    <div className="code-shell">
+    <div className={`code-shell ${isCollapsed ? 'collapsed' : ''}`}>
       <div className="code-topbar">
-        <span>{label}</span>
-        <button type="button" onClick={onCopy} className="ghost-button">
-          {copied ? 'Copied' : 'Copy Code'}
-        </button>
+        <span className="code-language-badge">
+          <span
+            className="code-language-icon"
+            style={{ color: languageMeta.color }}
+            aria-hidden="true"
+          >
+            {LanguageIcon ? <LanguageIcon size={13} /> : languageMeta.fallback}
+          </span>
+          <span>{languageMeta.label}</span>
+        </span>
+        <span className="code-file-pill" title={fileName}>{fileName}</span>
+        <span className="code-topbar-meta">{totalLines} lines</span>
+        <div className="code-toolbar-group">
+          {isCollapsible && (
+            <button
+              type="button"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              className="ghost-button code-button"
+            >
+              {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              <span className="code-button-label">{isExpanded ? 'Collapse' : 'Expand'}</span>
+            </button>
+          )}
+          <button type="button" onClick={onDownload} className="ghost-button code-button">
+            <Download size={13} />
+            <span className="code-button-label">Download</span>
+          </button>
+          <button type="button" onClick={onCopy} className="ghost-button code-button">
+            <Copy size={13} />
+            <span className="code-button-label">{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
       </div>
-      <SyntaxHighlighter
-        language={label}
-        style={oneDark}
-        PreTag="div"
-        customStyle={{ margin: 0, borderRadius: 0, background: 'transparent' }}
-      >
-        {textContent}
-      </SyntaxHighlighter>
+      <div className="code-body" style={collapsedBodyStyle}>
+        {hasNestedFencedBlocks ? (
+          <div className="embedded-markdown-code">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                code: ({ node, className, children, ...props }) => {
+                  const nestedCode = String(children)
+                  const nestedLanguage = className?.replace('language-', '')
+                  const nestedMeta =
+                    ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                      ?.data?.meta ||
+                      (node as { meta?: string } | undefined)?.meta ||
+                      '')
+                  const isBlock = Boolean(nestedLanguage) || nestedCode.includes('\n')
+
+                  if (isBlock) {
+                    return (
+                      <CopyableCodeBlock language={nestedLanguage} meta={nestedMeta}>
+                        {nestedCode}
+                      </CopyableCodeBlock>
+                    )
+                  }
+
+                  return (
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  )
+                },
+              }}
+            >
+              {textContent}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <SyntaxHighlighter
+            language={language || 'text'}
+            style={vscDarkPlus}
+            showLineNumbers={showLineNumbers}
+            wrapLongLines
+            wrapLines
+            lineProps={(lineNumber) =>
+              highlightSet.has(lineNumber)
+                ? { className: 'code-line-highlight' }
+                : { className: 'code-line' }
+            }
+            lineNumberStyle={{ color: 'rgba(181, 199, 229, 0.45)', minWidth: '2.4em' }}
+            PreTag="div"
+            customStyle={{ margin: 0, borderRadius: 0, background: 'transparent', padding: '14px' }}
+          >
+            {textContent}
+          </SyntaxHighlighter>
+        )}
+        {isCollapsed && <div className="code-fade" aria-hidden="true" />}
+      </div>
+      {isCollapsed && (
+        <div className="code-status-note">
+          Showing first {MAX_COLLAPSED_LINES} of {totalLines} lines.
+        </div>
+      )}
     </div>
   )
 }
@@ -648,6 +1195,7 @@ function AuthScreen() {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [pending, setPending] = useState(false)
   const [authPopup, setAuthPopup] = useState<{
     type: 'error' | 'success'
@@ -743,81 +1291,336 @@ function AuthScreen() {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <p className="badge">Llama AI</p>
-        <h1>Your AI Workspace</h1>
-        <p className="muted-text">Fast chats, clean answers, and saved conversations.</p>
+        <div className="auth-layout">
+          <section className="auth-marketing">
+            <div className="auth-orb auth-orb-one" />
+            <div className="auth-orb auth-orb-two" />
+            <img className="auth-logo-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+            <p className="auth-eyebrow">Llama AI Workspace</p>
+            <h1>Intelligence, organized.</h1>
+            <p className="muted-text">
+              Sign in to a premium chat system for fast conversations, shared links,
+              and saved context.
+            </p>
 
-        {!supabase && (
-          <p className="error-text">
-            Missing Supabase keys. Set VITE_SUPABASE_URL and
-            VITE_SUPABASE_ANON_KEY.
-          </p>
-        )}
+            <div className="auth-visual">
+              <div className="auth-visual-card auth-visual-card-one">
+                <span className="auth-visual-line auth-line-long" />
+                <span className="auth-visual-line auth-line-medium" />
+                <span className="auth-visual-line auth-line-short" />
+              </div>
+              <div className="auth-visual-card auth-visual-card-two">
+                <span className="auth-visual-line auth-line-short" />
+                <span className="auth-visual-line auth-line-long" />
+              </div>
+            </div>
+          </section>
 
-        {authPopup && (
-          <div className={`auth-popup ${authPopup.type}`} role="alert">
-            {authPopup.message}
-          </div>
-        )}
+          <section className="auth-panel">
+            <div className="auth-panel-head">
+              <div>
+                <p className="auth-panel-kicker">Secure access</p>
+                <h2>{isSignUp ? 'Create your account' : 'Welcome back'}</h2>
+              </div>
+            </div>
 
-        <button
-          type="button"
-          onClick={onGoogle}
-          className="primary-button"
-          disabled={pending || !supabase}
-        >
-          Continue with Google
-        </button>
+            {!supabase && (
+              <p className="error-text">
+                Missing Supabase keys. Set VITE_SUPABASE_URL and
+                VITE_SUPABASE_ANON_KEY.
+              </p>
+            )}
 
-        <div className="divider">or</div>
+            {authPopup && (
+              <div className={`auth-popup ${authPopup.type}`} role="alert">
+                {authPopup.message}
+              </div>
+            )}
 
-        <form onSubmit={onEmail} className="auth-form">
-          {isSignUp && (
-            <input
-              type="text"
-              placeholder="Username"
-              required
-              minLength={2}
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-            />
-          )}
-          <input
-            type="email"
-            placeholder="Email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            required
-            minLength={6}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
+            <button
+              type="button"
+              onClick={onGoogle}
+              className="primary-button"
+              disabled={pending || !supabase}
+            >
+              Continue with Google
+            </button>
 
-          <button
-            type="submit"
-            className="secondary-button"
-            disabled={pending || !supabase}
-          >
-            {pending ? 'Please wait...' : isSignUp ? 'Create account' : 'Sign in'}
-          </button>
-        </form>
+            <div className="divider">or</div>
 
-        <button
-          type="button"
-          className="text-button"
-          onClick={() => setIsSignUp((prev) => !prev)}
-        >
-          {isSignUp
-            ? 'Already have an account? Sign in'
-            : "Don't have an account? Create one"}
-        </button>
+            <form onSubmit={onEmail} className="auth-form">
+              {isSignUp && (
+                <input
+                  type="text"
+                  placeholder="Username"
+                  required
+                  minLength={2}
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                />
+              )}
+              <input
+                type="email"
+                placeholder="Email"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+              <div className="password-field">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Password"
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(event) => {
+                    const nextPassword = event.target.value
+                    setPassword(nextPassword)
+                    if (nextPassword.length === 0) {
+                      setShowPassword(false)
+                    }
+                  }}
+                />
+                {password.length > 0 && (
+                  <button
+                    type="button"
+                    className="password-toggle"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                className="secondary-button"
+                disabled={pending || !supabase}
+              >
+                {pending ? 'Please wait...' : isSignUp ? 'Create account' : 'Sign in'}
+              </button>
+            </form>
+
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => setIsSignUp((prev) => !prev)}
+            >
+              {isSignUp
+                ? 'Already have an account? Sign in'
+                : "Don't have an account? Create one"}
+            </button>
+          </section>
+        </div>
 
       </div>
+    </div>
+  )
+}
+
+type LandingPageProps = {
+  session: Session | null
+}
+
+function LandingPage({ session }: LandingPageProps) {
+  const navigate = useNavigate()
+
+  const primaryAction = () => {
+    navigate(session ? '/chat' : '/auth')
+  }
+
+  const secondaryAction = () => {
+    navigate(session ? '/dashboard' : '/auth')
+  }
+
+  return (
+    <div className="landing-wrap">
+      <div className="landing-noise" aria-hidden="true" />
+      <header className="landing-topbar">
+        <div className="landing-brand">
+          <img className="landing-brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+          <p>Llama AI</p>
+        </div>
+      </header>
+
+      <main className="landing-hero">
+        <section className="landing-copy">
+          <p className="landing-kicker">Practical intelligence studio</p>
+          <h1>
+            Chat faster.
+            <span>Share cleanly.</span>
+            Stay in flow.
+          </h1>
+          <p className="landing-subtext">
+            A focused AI workspace with model-aware responses, image understanding,
+            and one-click public sharing for read-only threads.
+          </p>
+          <div className="landing-actions">
+            <button className="landing-cta-primary" onClick={primaryAction}>
+              <MessageSquarePlus size={16} />
+              {session ? 'Open Workspace' : 'Start Free'}
+            </button>
+            <button className="landing-cta-secondary" onClick={secondaryAction}>
+              <LayoutDashboard size={16} />
+              {session ? 'Open Dashboard' : 'Create Account'}
+            </button>
+          </div>
+        </section>
+
+        <section className="landing-stage" aria-label="Platform highlights">
+          <article className="landing-panel landing-panel-main">
+            <div className="landing-panel-head">
+              <span className="landing-pill">Live</span>
+              <span className="landing-panel-title">Model-aware answers</span>
+            </div>
+            <div className="landing-wave" />
+            <div className="landing-metrics">
+              <div>
+                <strong>5</strong>
+                <span>Engine profiles</span>
+              </div>
+              <div>
+                <strong>1</strong>
+                <span>Tap regenerate</span>
+              </div>
+              <div>
+                <strong>∞</strong>
+                <span>Thread continuity</span>
+              </div>
+            </div>
+          </article>
+
+          <article className="landing-panel landing-panel-mini rotate-left">
+            <Cpu size={16} />
+            <p>Adaptive model labels in every assistant reply.</p>
+          </article>
+
+          <article className="landing-panel landing-panel-mini rotate-right">
+            <Share2 size={16} />
+            <p>Public links open in read-only mode without login.</p>
+          </article>
+        </section>
+      </main>
+
+      <section className="landing-detail-grid" aria-label="Platform details">
+        <article className="landing-detail-card">
+          <p className="landing-detail-kicker">Why teams pick this</p>
+          <h3>Built for real workflows, not toy prompts.</h3>
+          <ul className="landing-detail-list">
+            <li>
+              <Check size={14} />
+              Model labels on each answer for transparency.
+            </li>
+            <li>
+              <Check size={14} />
+              Regenerate keeps your thread context in place.
+            </li>
+            <li>
+              <Check size={14} />
+              Image prompts stay attached to conversation history.
+            </li>
+            <li>
+              <Check size={14} />
+              Shared links are read-only for safer collaboration.
+            </li>
+          </ul>
+        </article>
+
+        <article className="landing-detail-card">
+          <p className="landing-detail-kicker">How it works</p>
+          <h3>Three-step loop from idea to output.</h3>
+          <div className="landing-timeline">
+            <div className="landing-timeline-item">
+              <span>01</span>
+              <p>Start a focused prompt or upload an image.</p>
+            </div>
+            <div className="landing-timeline-item">
+              <span>02</span>
+              <p>Choose the model profile that matches your intent.</p>
+            </div>
+            <div className="landing-timeline-item">
+              <span>03</span>
+              <p>Regenerate, refine, and share the final thread.</p>
+            </div>
+          </div>
+        </article>
+
+        <article className="landing-detail-card landing-detail-cta">
+          <p className="landing-detail-kicker">Ready to launch</p>
+          <h3>Jump into your workspace now.</h3>
+          <p>
+            Continue with Google or email, then begin a new chat immediately.
+          </p>
+          <div className="landing-actions">
+            <button className="landing-cta-primary" onClick={primaryAction}>
+              <MessageSquarePlus size={16} />
+              {session ? 'Go to Chat' : 'Get Started'}
+            </button>
+            <button className="landing-cta-secondary" onClick={() => navigate('/auth')}>
+              <LogIn size={16} />
+              Open Sign In
+            </button>
+          </div>
+        </article>
+      </section>
+
+      <section className="landing-faq-section" aria-label="Frequently asked questions">
+        <div className="landing-faq-head">
+          <p className="landing-detail-kicker">FAQ</p>
+          <h3>Questions answered before you sign in.</h3>
+          <p>
+            A few quick answers about how the workspace behaves and what you can do
+            with shared conversations.
+          </p>
+        </div>
+
+        <div className="landing-faq-list">
+          <details className="landing-faq-item" open>
+            <summary>Can I use it without creating a new workflow?</summary>
+            <p>
+              Yes. Start with chat, upload images, regenerate responses, and share
+              read-only links without changing how you already work.
+            </p>
+          </details>
+          <details className="landing-faq-item">
+            <summary>What happens when I share a conversation?</summary>
+            <p>
+              Shared conversations open in a public read-only page. Recipients can
+              view the thread without logging in and cannot continue it.
+            </p>
+          </details>
+          <details className="landing-faq-item">
+            <summary>Does image input stay attached to the conversation?</summary>
+            <p>
+              Yes. Uploaded images remain tied to the message history, so regenerate
+              and review flows keep the correct context.
+            </p>
+          </details>
+          <details className="landing-faq-item">
+            <summary>Is this optimized for mobile?</summary>
+            <p>
+              The landing page and auth screen are both responsive, and the landing
+              page scrolls naturally on smaller devices.
+            </p>
+          </details>
+        </div>
+      </section>
+
+      <footer className="landing-footer">
+        <div>
+          <p className="landing-footer-brand">Llama AI Workspace</p>
+          <p className="landing-footer-text">
+            Focused chat, public sharing, image prompts, and clean thread management.
+          </p>
+        </div>
+
+        <div className="landing-footer-links">
+          <button onClick={primaryAction}>Open Chat</button>
+          <button onClick={() => navigate('/dashboard')}>Dashboard</button>
+        </div>
+      </footer>
     </div>
   )
 }
@@ -827,12 +1630,14 @@ type ChatWorkspaceProps = {
   activeConversationId: string | null
   activeConversationModel: AIModel
   activeMessages: ChatMessage[]
+  scrollAnchorMessageId: string | null
   promptPurpose: PromptPurpose
   promptCards: string[]
   draft: string
   selectedModel: AIModel
   enterToSend: boolean
   voiceLanguage: VoiceLanguage
+  readVoiceUri: string
   isAnalyzingImage: boolean
   isGenerating: boolean
   generatingConversationId: string | null
@@ -843,8 +1648,18 @@ type ChatWorkspaceProps = {
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   setDraft: React.Dispatch<React.SetStateAction<string>>
   setSelectedModel: React.Dispatch<React.SetStateAction<AIModel>>
-  onSendOrStop: (input: string, imageFile?: File | null, imageDataUrl?: string | null) => Promise<void>
-  sendMessage: (input: string, imageFile?: File | null, imageDataUrl?: string | null) => Promise<void>
+  onSendOrStop: (
+    input: string,
+    imageFile?: File | null,
+    imageDataUrl?: string | null,
+    options?: GenerationOptions,
+  ) => Promise<void>
+  sendMessage: (
+    input: string,
+    imageFile?: File | null,
+    imageDataUrl?: string | null,
+    options?: GenerationOptions,
+  ) => Promise<void>
   onNewChat: () => Promise<void>
   onShareMessage: (content: string) => Promise<void>
   onShareConversation: (conversationId: string) => Promise<void>
@@ -854,6 +1669,8 @@ type ChatWorkspaceProps = {
   onSelectConversation: (conversationId: string) => void
   endRef: React.RefObject<HTMLDivElement | null>
   imageDataMap: Record<string, string>
+  imageTagDataMap: Record<string, string>
+  imagePromptDataMap: Record<string, string[]>
 }
 
 function ChatWorkspace({
@@ -861,12 +1678,14 @@ function ChatWorkspace({
   activeConversationId,
   activeConversationModel,
   activeMessages,
+  scrollAnchorMessageId,
   promptPurpose,
   promptCards,
   draft,
   selectedModel,
   enterToSend,
   voiceLanguage,
+  readVoiceUri,
   isAnalyzingImage,
   isGenerating,
   generatingConversationId,
@@ -888,9 +1707,34 @@ function ChatWorkspace({
   onSelectConversation,
   endRef,
   imageDataMap,
+  imageTagDataMap,
+  imagePromptDataMap,
 }: ChatWorkspaceProps) {
   const navigate = useNavigate()
+  const visibleMessages = useMemo(() => {
+    const normalizePrompt = (value: string) =>
+      value.replace(/\[Image:\s*[^\]]+\]/gi, '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+    return activeMessages.reduce<ChatMessage[]>((accumulator, message) => {
+      const previous = accumulator[accumulator.length - 1]
+      if (
+        previous &&
+        previous.role === message.role &&
+        message.role === 'user' &&
+        normalizePrompt(previous.content) === normalizePrompt(message.content)
+      ) {
+        return accumulator
+      }
+
+      accumulator.push(message)
+      return accumulator
+    }, [])
+  }, [activeMessages])
+
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const messageScrollRef = useRef<HTMLElement | null>(null)
+  const anchorAppliedRef = useRef(false)
+  const lastAnchoredMessageIdRef = useRef<string | null>(null)
   const recognitionRef = useRef<any>(null)
   const voiceBaseDraftRef = useRef('')
   const maxComposerHeight = 260
@@ -938,6 +1782,47 @@ function ChatWorkspace({
 
     resizeComposerTextarea(textarea)
   }, [draft])
+
+  useLayoutEffect(() => {
+    if (!scrollAnchorMessageId) return
+    if (
+      lastAnchoredMessageIdRef.current === scrollAnchorMessageId &&
+      anchorAppliedRef.current
+    ) {
+      return
+    }
+
+    const container = messageScrollRef.current
+    const target = document.getElementById(`message-${scrollAnchorMessageId}`)
+    if (!container || !target) return
+
+    anchorAppliedRef.current = false
+    requestAnimationFrame(() => {
+      const containerRect = container.getBoundingClientRect()
+      const targetRect = target.getBoundingClientRect()
+      const nextTop = container.scrollTop + (targetRect.top - containerRect.top) - 12
+      container.scrollTop = Math.max(0, nextTop)
+      anchorAppliedRef.current = true
+      lastAnchoredMessageIdRef.current = scrollAnchorMessageId
+    })
+  }, [scrollAnchorMessageId, visibleMessages.length])
+
+  useEffect(() => {
+    if (!anchorAppliedRef.current) return
+    if (!isGenerating || activeConversationId !== generatingConversationId) return
+
+    const assistantHasContent = visibleMessages.some(
+      (message) => message.role === 'assistant' && message.content.trim().length > 0,
+    )
+
+    if (!assistantHasContent) return
+
+    requestAnimationFrame(() => {
+      const container = messageScrollRef.current
+      if (!container) return
+      container.scrollTop = container.scrollHeight
+    })
+  }, [activeConversationId, generatingConversationId, isGenerating, visibleMessages])
 
   useEffect(() => {
     const SpeechRecognitionCtor =
@@ -1025,6 +1910,15 @@ function ChatWorkspace({
 
     const utterance = new SpeechSynthesisUtterance(plainText)
     utterance.lang = voiceLanguage
+    if (readVoiceUri && readVoiceUri !== 'default') {
+      const selectedVoice = window.speechSynthesis
+        .getVoices()
+        .find((voice) => voice.voiceURI === readVoiceUri)
+      if (selectedVoice) {
+        utterance.voice = selectedVoice
+        utterance.lang = selectedVoice.lang || voiceLanguage
+      }
+    }
     utterance.onend = () => setReadingMessageId(null)
     utterance.onerror = () => setReadingMessageId(null)
 
@@ -1039,14 +1933,91 @@ function ChatWorkspace({
     setTimeout(() => setCopiedMessageId(null), 2000)
   }
 
+  const handleRegenerateMessage = async (
+    messageId: string,
+    messageModel: AIModel,
+    messageContent: string,
+    messageCreatedAt: string,
+  ) => {
+    if (isGenerating) return
+
+    const messageIndex = activeMessages.findIndex((message) => message.id === messageId)
+    if (messageIndex <= 0) return
+
+    const promptImageCursor: Record<string, number> = {}
+
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const candidate = activeMessages[index]
+      if (candidate?.role !== 'user') continue
+
+      const promptText = candidate.content.replace(/\[Image:\s*[^\]]+\]/g, '').trim()
+      const regeneratePrompt =
+        promptText || (candidate.content.includes('[Image:') ? 'Analyze this image' : '')
+
+      if (!regeneratePrompt) return
+
+      const imageTagMatch = candidate.content.match(/\[Image:\s*([^\]]+)\]/)
+      const imageTag = imageTagMatch?.[1]?.trim().toLowerCase()
+      const imageTagKey = imageTag ? `${candidate.conversation_id}::${imageTag}` : null
+      const promptSignatureImage = resolveImageFromPromptSignature(
+        candidate,
+        imagePromptDataMap,
+        promptImageCursor,
+      )
+      const userImageSrc =
+        imageDataMap[candidate.id] ||
+        (imageTagKey ? imageTagDataMap[imageTagKey] : undefined) ||
+        promptSignatureImage
+
+      let regenerateImageFile: File | null = null
+      if (userImageSrc) {
+        const blob = await (await fetch(userImageSrc)).blob()
+        const imageFileName = imageTagMatch?.[1]?.trim() || 'image.png'
+        regenerateImageFile = new File([blob], imageFileName, {
+          type: blob.type || 'image/png',
+        })
+      }
+
+      void onSendOrStop(regeneratePrompt, regenerateImageFile, userImageSrc, {
+        isRegenerate: true,
+        replaceAssistantMessageId: messageId,
+        replaceAssistantCreatedAt: messageCreatedAt,
+        replaceAssistantContent: messageContent,
+        overrideModel: messageModel,
+        anchorMessageId: candidate.id,
+        originalPromptMessageId: candidate.id,
+        regeneratePromptContent: candidate.content,
+      })
+      return
+    }
+  }
+
   const isStopState =
     isGenerating && activeConversationId === generatingConversationId
 
+  const handleComposerSendOrStop = () => {
+    if (isGenerating && activeConversationId !== generatingConversationId) {
+      return
+    }
+
+    const imageFile = selectedImageFile
+    const imageUrl = previewImageUrl
+    void onSendOrStop(draft, imageFile, imageUrl)
+
+    // When a message with image is submitted, clear the composer preview card.
+    if (!isStopState && imageFile) {
+      clearSelectedImage()
+    }
+  }
+
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${isGenerating ? 'streaming' : ''}`}>
         <div className="sidebar-top">
-          <p className="badge">Llama AI</p>
+          <div className="sidebar-brand">
+            <img className="sidebar-brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+            <p>Llama AI</p>
+          </div>
           <button className="icon-button" onClick={() => setSidebarOpen(false)}>
             <X size={16} />
           </button>
@@ -1059,37 +2030,43 @@ function ChatWorkspace({
 
         <div className="conversations-container">
           <div className="conversation-list">
-            {conversations.map((conv) => (
-              <div
-                key={conv.id}
-                className={`conversation-row ${
-                  activeConversationId === conv.id ? 'active' : ''
-                }`}
-              >
-                <button
-                  className="conversation-item"
-                  onClick={() => onSelectConversation(conv.id)}
+            {conversations.map((conv) => {
+              const isBackgroundGenerating = isGenerating && generatingConversationId === conv.id && activeConversationId !== conv.id
+              return (
+                <div
+                  key={conv.id}
+                  className={`conversation-row ${
+                    activeConversationId === conv.id ? 'active' : ''
+                  } ${isBackgroundGenerating ? 'generating-background' : ''}`}
                 >
-                  {conv.title}
-                </button>
-                <div className="conversation-actions">
                   <button
-                    className="conversation-share"
-                    onClick={() => void onShareConversation(conv.id)}
-                    aria-label="Share conversation"
+                    className="conversation-item"
+                    onClick={() => onSelectConversation(conv.id)}
                   >
-                    <Share2 size={14} />
+                    {conv.title}
+                    {isBackgroundGenerating && (
+                      <span className="generating-indicator" title="Generating response in background" />
+                    )}
                   </button>
-                  <button
-                    className="conversation-delete"
-                    onClick={() => onDeleteConversationRequest(conv.id)}
-                    aria-label="Delete conversation"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="conversation-actions">
+                    <button
+                      className="conversation-share"
+                      onClick={() => void onShareConversation(conv.id)}
+                      aria-label="Share conversation"
+                    >
+                      <Share2 size={14} />
+                    </button>
+                    <button
+                      className="conversation-delete"
+                      onClick={() => onDeleteConversationRequest(conv.id)}
+                      aria-label="Delete conversation"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
 
@@ -1122,8 +2099,8 @@ function ChatWorkspace({
           </div>
         </header>
 
-        <main className="message-scroll">
-          {activeMessages.length === 0 ? (
+        <main ref={messageScrollRef} className="message-scroll">
+          {visibleMessages.length === 0 ? (
             <section className="empty-state">
               <h3>How can I help today?</h3>
               <p>Pick a suggestion or type your own message.</p>
@@ -1145,12 +2122,39 @@ function ChatWorkspace({
             </section>
           ) : (
             <div className="message-list">
-              {activeMessages.map((message, index) => {
+              {(() => {
+                const promptImageCursor: Record<string, number> = {}
+                return visibleMessages.map((message, index) => {
                 const isPendingAssistant =
                   message.role === 'assistant' &&
                   !message.content.trim() &&
                   isGenerating &&
-                  index === activeMessages.length - 1
+                  index === visibleMessages.length - 1
+                const userImageTagMatch =
+                  message.role === 'user'
+                    ? message.content.match(/\[Image:\s*([^\]]+)\]/)
+                    : null
+                const imageTag = userImageTagMatch?.[1]?.trim().toLowerCase()
+                const imageTagKey = imageTag
+                  ? `${message.conversation_id}::${imageTag}`
+                  : null
+                const promptSignatureImage =
+                  message.role === 'user'
+                    ? resolveImageFromPromptSignature(
+                        message,
+                        imagePromptDataMap,
+                        promptImageCursor,
+                      )
+                    : undefined
+                const userImageSrc =
+                  (message.role === 'user' && imageDataMap[message.id]) ||
+                  (imageTagKey ? imageTagDataMap[imageTagKey] : undefined) ||
+                  promptSignatureImage
+                const hasUserImage = Boolean(userImageSrc)
+                const userPromptText =
+                  message.role === 'user'
+                    ? message.content.replace(/\[Image:\s*[^\]]+\]/g, '').trim()
+                    : ''
                 const messageModel =
                   message.role === 'assistant'
                     ? getMessageModel(message) || activeConversationModel
@@ -1159,22 +2163,29 @@ function ChatWorkspace({
                 return (
                   <article
                     key={message.id}
+                    id={`message-${message.id}`}
                     className={`message-row ${
                       message.role === 'user' ? 'user-row' : 'assistant-row'
                     }`}
                   >
-                    <div className={`bubble ${message.role}`}>
-                      {message.role === 'user' && message.content.includes('[Image:') && imageDataMap[message.id] && (
-                        <div className="message-image-container">
+                    <div
+                      className={`bubble ${message.role} ${
+                        message.role === 'user' && hasUserImage ? 'with-image' : ''
+                      }`}
+                    >
+                      {message.role === 'user' && hasUserImage && (
+                        <div className="message-image-card">
                           <img
-                            src={imageDataMap[message.id]}
+                            src={userImageSrc}
                             alt="Uploaded image"
                             className="message-image"
                             onClick={() => {
-                              setPreviewImageUrl(imageDataMap[message.id])
+                              if (!userImageSrc) return
+                              setPreviewImageUrl(userImageSrc)
                               setShowImageModal(true)
                             }}
                           />
+                          {userPromptText && <p className="message-image-caption">{userPromptText}</p>}
                         </div>
                       )}
                       {isPendingAssistant ? (
@@ -1189,14 +2200,19 @@ function ChatWorkspace({
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={{
-                              code: ({ className, children, ...props }) => {
+                              code: ({ node, className, children, ...props }) => {
                                 const code = String(children)
                                 const language = className?.replace('language-', '')
+                                const meta =
+                                  ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                                    ?.data?.meta ||
+                                    (node as { meta?: string } | undefined)?.meta ||
+                                    '')
                                 const isBlock = Boolean(language) || code.includes('\n')
 
                                 if (isBlock) {
                                   return (
-                                    <CopyableCodeBlock language={language}>
+                                    <CopyableCodeBlock language={language} meta={meta}>
                                       {code}
                                     </CopyableCodeBlock>
                                   )
@@ -1212,49 +2228,76 @@ function ChatWorkspace({
                           >
                             {cleanAssistantOutput(message.content)}
                           </ReactMarkdown>
-
-                          <div className="message-actions">
-                            <button
-                              type="button"
-                              className={`ghost-button action-btn ${copiedMessageId === message.id ? 'copied' : ''}`}
-                              onClick={() => handleCopyMessage(message.id, message.content)}
-                            >
-                              <Copy size={14} />
-                              {copiedMessageId === message.id ? 'Copied' : 'Copy'}
-                            </button>
-                            <button
-                              type="button"
-                              className={`ghost-button action-btn ${readingMessageId === message.id ? 'reading' : ''}`}
-                              onClick={() => handleReadAloud(message.id, message.content)}
-                              title={readingMessageId === message.id ? 'Stop reading' : 'Read aloud'}
-                            >
-                              <Volume2 size={14} className={readingMessageId === message.id ? 'speaker-wave' : ''} />
-                              {readingMessageId === message.id ? 'Stop' : 'Read'}
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button action-btn"
-                              onClick={() => void onShareMessage(message.content)}
-                            >
-                              <Share2 size={14} />
-                              Share
-                            </button>
-                            <span className="message-model-chip">
-                              Model: {MODEL_ENGINE_LABELS[messageModel || activeConversationModel]}
-                            </span>
-                          </div>
                         </>
                       ) : (
-                        <p>
-                          {message.content
-                            .replace(/\[Image: [^\]]+\]/g, '')
-                            .trim() || (message.content.includes('[Image:') ? 'Image sent' : message.content)}
-                        </p>
+                        !hasUserImage && (
+                          <p>
+                            {message.content
+                              .replace(/\[Image:\s*[^\]]+\]/g, '')
+                              .trim() || (message.content.includes('[Image:') ? 'Image sent' : message.content)}
+                          </p>
+                        )
                       )}
                     </div>
+                    {!isPendingAssistant && message.role === 'assistant' && (
+                      <div className="message-actions message-actions-outside">
+                        <button
+                          type="button"
+                          className="ghost-button action-btn message-action-icon"
+                          onClick={() =>
+                            void handleRegenerateMessage(
+                              message.id,
+                              messageModel || activeConversationModel,
+                              message.content,
+                              message.created_at,
+                            )
+                          }
+                          title="Regenerate"
+                          aria-label="Regenerate"
+                        >
+                          <RotateCcw size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className={`ghost-button action-btn message-action-icon ${copiedMessageId === message.id ? 'copied' : ''}`}
+                          onClick={() => handleCopyMessage(message.id, message.content)}
+                          title={copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                          aria-label={copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                        >
+                          {copiedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
+                        </button>
+                        <button
+                          type="button"
+                          className={`ghost-button action-btn message-action-icon ${readingMessageId === message.id ? 'reading' : ''}`}
+                          onClick={() => handleReadAloud(message.id, message.content)}
+                          title={readingMessageId === message.id ? 'Reading...' : 'Read aloud'}
+                          aria-label={readingMessageId === message.id ? 'Reading' : 'Read aloud'}
+                        >
+                          {readingMessageId === message.id ? (
+                            <Loader2 size={16} className="action-icon-spin" />
+                          ) : (
+                            <Volume2 size={16} />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button action-btn message-action-icon"
+                          onClick={() => void onShareMessage(message.content)}
+                          title="Share"
+                          aria-label="Share"
+                        >
+                          <Share2 size={16} />
+                        </button>
+                        <span className="message-model-pill" title="Model used">
+                          <Cpu size={16} />
+                          {MODEL_ENGINE_LABELS[messageModel || activeConversationModel]}
+                        </span>
+                      </div>
+                    )}
                   </article>
                 )
-              })}
+              })
+              })()}
             </div>
           )}
           <div ref={endRef} />
@@ -1263,16 +2306,46 @@ function ChatWorkspace({
         <footer className="composer-wrap">
           {error && <p className="error-text">{error}</p>}
           {notice && <p className="notice-text">{notice}</p>}
-          <div className="composer-options">
-            <CustomDropdown
-              value={selectedModel}
-              options={COMPOSER_MODEL_OPTIONS.map((model) => ({
-                value: model,
-                label: MODEL_LABELS[model],
-              }))}
-              onChange={setSelectedModel}
-            />
-          </div>
+          {!selectedImageFile && (
+            <div className="composer-options">
+              <CustomDropdown
+                value={selectedModel}
+                options={COMPOSER_MODEL_OPTIONS.map((model) => ({
+                  value: model,
+                  label: MODEL_LABELS[model],
+                }))}
+                onChange={setSelectedModel}
+              />
+            </div>
+          )}
+          {selectedImageFile && previewImageUrl && (
+            <div className="composer-image-preview">
+              <button
+                type="button"
+                className="composer-image-preview-button"
+                onClick={() => setShowImageModal(true)}
+                title="Open image preview"
+              >
+                <img
+                  src={previewImageUrl}
+                  alt={selectedImageFile.name || 'Selected image'}
+                  className="composer-image-preview-thumb"
+                />
+                <span className="composer-image-preview-meta">
+                  <strong>{selectedImageFile.name}</strong>
+                  <span>Image attached</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={clearSelectedImage}
+                title="Remove selected image"
+                className="composer-image-preview-close"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
           <div className="composer">
             <input
               ref={fileInputRef}
@@ -1311,14 +2384,7 @@ function ChatWorkspace({
 
                 if (shouldSend) {
                   event.preventDefault()
-                  if (
-                    isGenerating &&
-                    activeConversationId !== generatingConversationId
-                  ) {
-                    return
-                  }
-                  void onSendOrStop(draft, selectedImageFile, previewImageUrl)
-                  clearSelectedImage()
+                  handleComposerSendOrStop()
                 }
               }}
             />
@@ -1358,11 +2424,7 @@ function ChatWorkspace({
                   isStopState ? 'stop' : 'send'
                 }`}
                 onClick={() => {
-                  if (isGenerating && activeConversationId !== generatingConversationId) {
-                    return
-                  }
-                  void onSendOrStop(draft, selectedImageFile, previewImageUrl)
-                  clearSelectedImage()
+                  handleComposerSendOrStop()
                 }}
                 disabled={isGenerating && activeConversationId !== generatingConversationId}
                 aria-label={isStopState ? 'Stop generation' : 'Send message'}
@@ -1388,10 +2450,10 @@ function ChatWorkspace({
               all its messages.
             </p>
             <div className="confirm-actions">
-              <button className="ghost-button" onClick={onCancelDeleteConversation}>
+              <button className="ghost-button confirm-action" onClick={onCancelDeleteConversation}>
                 Cancel
               </button>
-              <button className="settings-item danger" onClick={() => void onConfirmDeleteConversation()}>
+              <button className="settings-item danger confirm-action" onClick={() => void onConfirmDeleteConversation()}>
                 <Trash2 size={14} />
                 Delete
               </button>
@@ -1417,6 +2479,7 @@ type DashboardProps = {
   enterToSend: boolean
   suggestionCount: 4 | 6
   voiceLanguage: VoiceLanguage
+  readVoiceUri: string
   confirmClearChats: boolean
   onSavePersonalization: (
     name: string,
@@ -1427,6 +2490,7 @@ type DashboardProps = {
     enterToSend: boolean,
     suggestionCount: 4 | 6,
     voiceLanguage: VoiceLanguage,
+    readVoiceUri: string,
     confirmClearChats: boolean,
   ) => void
   onClearChats: () => Promise<void>
@@ -1447,6 +2511,7 @@ function Dashboard({
   enterToSend,
   suggestionCount,
   voiceLanguage,
+  readVoiceUri,
   confirmClearChats,
   onSavePersonalization,
   onSaveExperienceSettings,
@@ -1454,13 +2519,22 @@ function Dashboard({
   onLogout,
 }: DashboardProps) {
   const navigate = useNavigate()
+  const saveResetTimerRef = useRef<number | null>(null)
   const [nameDraft, setNameDraft] = useState(displayName)
   const [styleDraft, setStyleDraft] = useState<ResponseStyle>(responseStyle)
   const [purposeDraft, setPurposeDraft] = useState<PromptPurpose>(promptPurpose)
   const [enterToSendDraft, setEnterToSendDraft] = useState(enterToSend)
   const [suggestionCountDraft, setSuggestionCountDraft] = useState<4 | 6>(suggestionCount)
   const [voiceLanguageDraft, setVoiceLanguageDraft] = useState<VoiceLanguage>(voiceLanguage)
+  const [readVoiceUriDraft, setReadVoiceUriDraft] = useState(readVoiceUri)
+  const [previewingVoiceUri, setPreviewingVoiceUri] = useState<string | null>(null)
+  const previewUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const [readVoiceOptions, setReadVoiceOptions] = useState<Array<DropdownOption<string>>>([
+    { value: 'default', label: 'Default voice (Auto)' },
+  ])
   const [confirmClearDraft, setConfirmClearDraft] = useState(confirmClearChats)
+  const [personalizationSaveState, setPersonalizationSaveState] = useState<'idle' | 'saved'>('idle')
+  const [experienceSaveState, setExperienceSaveState] = useState<'idle' | 'saved'>('idle')
 
   useEffect(() => {
     setNameDraft(displayName)
@@ -1469,6 +2543,7 @@ function Dashboard({
     setEnterToSendDraft(enterToSend)
     setSuggestionCountDraft(suggestionCount)
     setVoiceLanguageDraft(voiceLanguage)
+    setReadVoiceUriDraft(readVoiceUri)
     setConfirmClearDraft(confirmClearChats)
   }, [
     displayName,
@@ -1477,8 +2552,117 @@ function Dashboard({
     enterToSend,
     suggestionCount,
     voiceLanguage,
+    readVoiceUri,
     confirmClearChats,
   ])
+
+  useEffect(() => {
+    setPreviewingVoiceUri(null)
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setReadVoiceOptions([{ value: 'default', label: 'Default voice (Auto)' }])
+      return
+    }
+
+    const synth = window.speechSynthesis
+    const updateVoiceOptions = () => {
+      const voices = synth.getVoices()
+      const filtered = voices.filter((voice) =>
+        matchesVoiceLanguage(voice.lang || '', voiceLanguageDraft),
+      )
+      // Online/Natural voices often hang on some browsers; prefer local voices for stability.
+      const stableVoices = filtered.filter((voice) => voice.localService)
+      const sourceVoices = stableVoices.length > 0 ? stableVoices : filtered
+
+      const mapped = sourceVoices.map((voice) => ({
+        value: voice.voiceURI,
+        label: formatVoiceDisplayName(voice.name),
+      }))
+      const seen = new Set<string>()
+      const unique = mapped.filter((voice) => {
+        if (seen.has(voice.value)) return false
+        seen.add(voice.value)
+        return true
+      })
+      setReadVoiceOptions([
+        { value: 'default', label: 'Default voice (Auto)' },
+        ...unique,
+      ])
+
+      if (
+        readVoiceUriDraft !== 'default' &&
+        !sourceVoices.some((voice) => voice.voiceURI === readVoiceUriDraft)
+      ) {
+        setReadVoiceUriDraft('default')
+      }
+    }
+
+    updateVoiceOptions()
+    synth.addEventListener('voiceschanged', updateVoiceOptions)
+    return () => synth.removeEventListener('voiceschanged', updateVoiceOptions)
+  }, [voiceLanguageDraft, readVoiceUriDraft])
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+      if (saveResetTimerRef.current) {
+        window.clearTimeout(saveResetTimerRef.current)
+      }
+    }
+  }, [])
+
+  const onPreviewVoice = (voiceUri: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+
+    const synth = window.speechSynthesis
+    if (previewingVoiceUri === voiceUri) {
+      synth.cancel()
+      setPreviewingVoiceUri(null)
+      previewUtteranceRef.current = null
+      return
+    }
+
+    synth.cancel()
+
+    const utterance = new SpeechSynthesisUtterance(
+      'This is a sample voice preview for your selected voice.',
+    )
+    utterance.lang = voiceLanguageDraft
+
+    if (voiceUri !== 'default') {
+      const selectedVoice = synth
+        .getVoices()
+        .find((voice) => voice.voiceURI === voiceUri)
+      if (selectedVoice) {
+        utterance.voice = selectedVoice
+        utterance.lang = selectedVoice.lang || voiceLanguageDraft
+      }
+    }
+
+    utterance.onend = () => {
+      setPreviewingVoiceUri((current) => (current === voiceUri ? null : current))
+      previewUtteranceRef.current = null
+    }
+    utterance.onerror = () => {
+      setPreviewingVoiceUri((current) => (current === voiceUri ? null : current))
+      previewUtteranceRef.current = null
+    }
+
+    setPreviewingVoiceUri(voiceUri)
+    previewUtteranceRef.current = utterance
+    synth.speak(utterance)
+  }
+
+  const flashSavedState = (setter: React.Dispatch<React.SetStateAction<'idle' | 'saved'>>) => {
+    setter('saved')
+    if (saveResetTimerRef.current) {
+      window.clearTimeout(saveResetTimerRef.current)
+    }
+    saveResetTimerRef.current = window.setTimeout(() => {
+      setter('idle')
+    }, 1400)
+  }
 
   const initials = (nameDraft || email || 'U')
     .trim()
@@ -1491,9 +2675,10 @@ function Dashboard({
     <div className="dashboard-screen">
       <div className="dashboard-card">
         <div className="dashboard-head">
-          <div>
+          <div className="dashboard-head-copy">
+            <p className="dashboard-eyebrow">Workspace settings</p>
             <h2>User Dashboard</h2>
-            <p className="muted-text">Customize your chat experience</p>
+            <p className="muted-text">Tune your profile, chat experience, and app behavior.</p>
           </div>
           <button
             className="icon-button"
@@ -1506,10 +2691,17 @@ function Dashboard({
 
         <section className="profile-panel">
           <div className="avatar-pill">{initials}</div>
-          <div>
+          <div className="profile-copy">
             <h3>{nameDraft || 'User'}</h3>
             <p className="muted-text">{email}</p>
             <p className="meta-line">ID: {userId.slice(0, 8)}... · Joined: {joinedAt}</p>
+            <div className="dashboard-badges">
+              <span className="dashboard-badge">Theme: {theme}</span>
+              <span className="dashboard-badge">Purpose: {PURPOSE_LABELS[promptPurpose]}</span>
+              <span className="dashboard-badge">
+                {enterToSend ? 'Enter sends' : 'Enter adds newline'}
+              </span>
+            </div>
           </div>
         </section>
 
@@ -1529,125 +2721,148 @@ function Dashboard({
         </section>
 
         <section className="dashboard-layout">
-        <section className="personalize-panel">
-          <h3>Personalization</h3>
-          <div className="personalize-grid">
-            <label className="field-block" htmlFor="display-name">
-              Display Name
-              <input
-                id="display-name"
-                value={nameDraft}
-                onChange={(event) => setNameDraft(event.target.value)}
-                placeholder="Your name"
-              />
-            </label>
-
-            <label className="field-block">
-              Response Style
-              <CustomDropdown
-                value={styleDraft}
-                options={(Object.keys(RESPONSE_STYLE_LABELS) as ResponseStyle[]).map(
-                  (style) => ({
-                    value: style,
-                    label: RESPONSE_STYLE_LABELS[style],
-                  }),
-                )}
-                onChange={setStyleDraft}
-              />
-            </label>
-
-            <label className="field-block">
-              Purpose
-              <CustomDropdown
-                value={purposeDraft}
-                options={(Object.keys(PURPOSE_LABELS) as PromptPurpose[]).map(
-                  (purpose) => ({
-                    value: purpose,
-                    label: PURPOSE_LABELS[purpose],
-                  }),
-                )}
-                onChange={setPurposeDraft}
-              />
-            </label>
-
-          </div>
-
-          <button
-            className="secondary-button"
-            onClick={() =>
-              onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft)
-            }
-          >
-            Save Preferences
-          </button>
-        </section>
-
-        <section className="personalize-panel">
-          <h3>Chat Experience</h3>
-          <div className="personalize-grid">
-            <label className="field-block">
-              Enter Key Behavior
+          <section className="personalize-panel">
+            <div className="panel-head">
+              <div>
+                <p className="panel-kicker">Profile</p>
+                <h3>Personalization</h3>
+              </div>
               <button
                 type="button"
-                className="settings-item"
-                onClick={() => setEnterToSendDraft((prev) => !prev)}
+                className="secondary-button dashboard-save-button"
+                onClick={() => {
+                  onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft)
+                  flashSavedState(setPersonalizationSaveState)
+                }}
               >
-                {enterToSendDraft ? 'Enter sends message' : 'Enter adds new line'}
+                {personalizationSaveState === 'saved' ? 'Saved' : 'Save preferences'}
               </button>
-            </label>
+            </div>
+            <div className="personalize-grid">
+              <label className="field-block" htmlFor="display-name">
+                Display Name
+                <input
+                  id="display-name"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  placeholder="Your name"
+                />
+              </label>
 
-            <label className="field-block">
-              Voice Language
-              <CustomDropdown
-                value={voiceLanguageDraft}
-                options={(Object.keys(VOICE_LANGUAGE_LABELS) as VoiceLanguage[]).map(
-                  (lang) => ({
-                    value: lang,
-                    label: VOICE_LANGUAGE_LABELS[lang],
-                  }),
-                )}
-                onChange={setVoiceLanguageDraft}
-              />
-            </label>
+              <label className="field-block">
+                Response Style
+                <CustomDropdown
+                  value={styleDraft}
+                  options={(Object.keys(RESPONSE_STYLE_LABELS) as ResponseStyle[]).map(
+                    (style) => ({
+                      value: style,
+                      label: RESPONSE_STYLE_LABELS[style],
+                    }),
+                  )}
+                  onChange={setStyleDraft}
+                />
+              </label>
 
-            <label className="field-block">
-              Suggestion Cards
-              <CustomDropdown
-                value={String(suggestionCountDraft) as '4' | '6'}
-                options={[
-                  { value: '4', label: '4 cards' },
-                  { value: '6', label: '6 cards' },
-                ]}
-                onChange={(value) => setSuggestionCountDraft(value === '6' ? 6 : 4)}
-              />
-            </label>
+              <label className="field-block">
+                Purpose
+                <CustomDropdown
+                  value={purposeDraft}
+                  options={(Object.keys(PURPOSE_LABELS) as PromptPurpose[]).map(
+                    (purpose) => ({
+                      value: purpose,
+                      label: PURPOSE_LABELS[purpose],
+                    }),
+                  )}
+                  onChange={setPurposeDraft}
+                />
+              </label>
+            </div>
+          </section>
 
-            <label className="field-block">
-              Clear Chats Safety
+          <section className="personalize-panel">
+            <div className="panel-head">
+              <div>
+                <p className="panel-kicker">Experience</p>
+                <h3>Chat Experience</h3>
+              </div>
               <button
                 type="button"
-                className="settings-item"
-                onClick={() => setConfirmClearDraft((prev) => !prev)}
+                className="secondary-button dashboard-save-button"
+                onClick={() => {
+                  onSaveExperienceSettings(
+                    enterToSendDraft,
+                    suggestionCountDraft,
+                    voiceLanguageDraft,
+                    readVoiceUriDraft,
+                    confirmClearDraft,
+                  )
+                  flashSavedState(setExperienceSaveState)
+                }}
               >
-                {confirmClearDraft ? 'Ask before clearing chats' : 'Clear chats immediately'}
+                {experienceSaveState === 'saved' ? 'Saved' : 'Save experience'}
               </button>
-            </label>
-          </div>
+            </div>
+            <div className="personalize-grid">
+              <label className="field-block">
+                Enter Key Behavior
+                <button
+                  type="button"
+                  className="settings-item"
+                  onClick={() => setEnterToSendDraft((prev) => !prev)}
+                >
+                  {enterToSendDraft ? 'Enter sends message' : 'Enter adds new line'}
+                </button>
+              </label>
 
-          <button
-            className="secondary-button"
-            onClick={() =>
-              onSaveExperienceSettings(
-                enterToSendDraft,
-                suggestionCountDraft,
-                voiceLanguageDraft,
-                confirmClearDraft,
-              )
-            }
-          >
-            Save Experience Settings
-          </button>
-        </section>
+              <label className="field-block">
+                Voice Language
+                <CustomDropdown
+                  value={voiceLanguageDraft}
+                  options={(Object.keys(VOICE_LANGUAGE_LABELS) as VoiceLanguage[]).map(
+                    (lang) => ({
+                      value: lang,
+                      label: VOICE_LANGUAGE_LABELS[lang],
+                    }),
+                  )}
+                  onChange={setVoiceLanguageDraft}
+                />
+              </label>
+
+              <label className="field-block">
+                Read Voice
+                <VoiceDropdown
+                  value={readVoiceUriDraft}
+                  options={readVoiceOptions}
+                  onChange={setReadVoiceUriDraft}
+                  onPreview={onPreviewVoice}
+                  previewingValue={previewingVoiceUri}
+                />
+              </label>
+
+              <label className="field-block">
+                Suggestion Cards
+                <CustomDropdown
+                  value={String(suggestionCountDraft) as '4' | '6'}
+                  options={[
+                    { value: '4', label: '4 cards' },
+                    { value: '6', label: '6 cards' },
+                  ]}
+                  onChange={(value) => setSuggestionCountDraft(value === '6' ? 6 : 4)}
+                />
+              </label>
+
+              <label className="field-block">
+                Clear Chats Safety
+                <button
+                  type="button"
+                  className="settings-item"
+                  onClick={() => setConfirmClearDraft((prev) => !prev)}
+                >
+                  {confirmClearDraft ? 'Ask before clearing chats' : 'Clear chats immediately'}
+                </button>
+              </label>
+            </div>
+          </section>
         </section>
 
         <div className="dashboard-grid">
@@ -1674,6 +2889,208 @@ function Dashboard({
   )
 }
 
+function SharedConversationView() {
+  const navigate = useNavigate()
+  const { shareToken } = useParams<{ shareToken: string }>()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [title, setTitle] = useState('Shared Conversation')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+
+  const visibleMessages = useMemo(() => {
+    const normalized = (value: string) =>
+      value.replace(/\[Image:\s*[^\]]+\]/gi, '').replace(/\s+/g, ' ').trim().toLowerCase()
+
+    return messages.reduce<ChatMessage[]>((accumulator, message) => {
+      const previous = accumulator[accumulator.length - 1]
+      if (
+        previous &&
+        previous.role === message.role &&
+        message.role === 'user' &&
+        normalized(previous.content) === normalized(message.content)
+      ) {
+        return accumulator
+      }
+
+      accumulator.push(message)
+      return accumulator
+    }, [])
+  }, [messages])
+
+  useEffect(() => {
+    if (!supabase) {
+      setError('Shared conversations are unavailable: Supabase is not configured.')
+      setLoading(false)
+      return
+    }
+
+    const token = (shareToken || '').trim()
+    if (!token) {
+      setError('Invalid share link.')
+      setLoading(false)
+      return
+    }
+
+    let active = true
+
+    const loadSharedConversation = async () => {
+      setLoading(true)
+      setError('')
+
+      const { data: conversation, error: conversationError } = await supabase
+        .from('conversations')
+        .select('id, title')
+        .eq('share_token', token)
+        .eq('is_shared', true)
+        .maybeSingle()
+
+      if (!active) return
+
+      if (conversationError) {
+        setError(conversationError.message)
+        setLoading(false)
+        return
+      }
+
+      if (!conversation?.id) {
+        setError('This shared conversation is unavailable or no longer shared.')
+        setLoading(false)
+        return
+      }
+
+      setTitle(conversation.title || 'Shared Conversation')
+
+      const { data: sharedMessages, error: messagesError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversation.id)
+        .order('created_at', { ascending: true })
+
+      if (!active) return
+
+      if (messagesError) {
+        setError(messagesError.message)
+        setLoading(false)
+        return
+      }
+
+      setMessages((sharedMessages || []) as ChatMessage[])
+      setLoading(false)
+    }
+
+    void loadSharedConversation()
+
+    return () => {
+      active = false
+    }
+  }, [shareToken])
+
+  return (
+    <div className="shared-page">
+      <section className="shared-card">
+        <header className="shared-head">
+          <div className="shared-head-copy">
+            <div className="shared-brand">
+              <img className="shared-brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+              <p>Shared Link</p>
+            </div>
+            <h2>{title}</h2>
+          </div>
+          <button className="shared-auth-button" onClick={() => navigate('/auth')}>
+            Login / Signup
+          </button>
+        </header>
+
+        <p className="shared-readonly-note">
+          View-only conversation. Replies are disabled for shared links.
+        </p>
+
+        {loading ? (
+          <div className="screen-loader shared-loader">Loading shared conversation...</div>
+        ) : error ? (
+          <p className="error-text">{error}</p>
+        ) : visibleMessages.length === 0 ? (
+          <div className="empty-state shared-empty-state">
+            <h3>No messages to display</h3>
+            <p>This shared conversation does not have visible messages yet.</p>
+          </div>
+        ) : (
+          <div className="shared-message-scroll">
+            <div className="message-list">
+              {visibleMessages.map((message) => {
+                const messageModel =
+                  message.role === 'assistant'
+                    ? getMessageModel(message)
+                    : null
+
+                return (
+                  <article
+                    key={message.id}
+                    className={`message-row ${message.role === 'user' ? 'user-row' : 'assistant-row'}`}
+                  >
+                    <div className={`bubble ${message.role}`}>
+                      {message.role === 'assistant' ? (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code: ({ node, className, children, ...props }) => {
+                              const code = String(children)
+                              const language = className?.replace('language-', '')
+                              const meta =
+                                ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                                  ?.data?.meta ||
+                                  (node as { meta?: string } | undefined)?.meta ||
+                                  '')
+                              const isBlock = Boolean(language) || code.includes('\n')
+
+                              if (isBlock) {
+                                return (
+                                  <CopyableCodeBlock language={language} meta={meta}>
+                                    {code}
+                                  </CopyableCodeBlock>
+                                )
+                              }
+
+                              return (
+                                <code className={className} {...props}>
+                                  {children}
+                                </code>
+                              )
+                            },
+                          }}
+                        >
+                          {cleanAssistantOutput(message.content)}
+                        </ReactMarkdown>
+                      ) : (
+                        <p>
+                          {message.content
+                            .replace(/\[Image:\s*[^\]]+\]/g, '')
+                            .trim() ||
+                            (message.content.includes('[Image:')
+                              ? 'Image sent'
+                              : message.content)}
+                        </p>
+                      )}
+                    </div>
+                    {message.role === 'assistant' && (
+                      <div className="message-actions message-actions-outside">
+                        <span className="message-model-pill" title="Model used">
+                          <Cpu size={16} />
+                          {MODEL_ENGINE_LABELS[messageModel || 'llama']}
+                        </span>
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -1693,8 +3110,8 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null)
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
-  const [isThinking, setIsThinking] = useState(false)
-  const [streamTick, setStreamTick] = useState(0)
+  const [, setIsThinking] = useState(false)
+  const [, setStreamTick] = useState(0)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -1703,10 +3120,15 @@ function App() {
   const [responseStyle, setResponseStyle] = useState<ResponseStyle>('balanced')
   const [enterToSend, setEnterToSend] = useState(true)
   const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('en-US')
+  const [readVoiceUri, setReadVoiceUri] = useState('default')
   const [suggestionCount, setSuggestionCount] = useState<4 | 6>(4)
   const [confirmClearChats, setConfirmClearChats] = useState(true)
   const [imageDataMap, setImageDataMap] = useState<Record<string, string>>({})
+  const [imageTagDataMap, setImageTagDataMap] = useState<Record<string, string>>({})
+  const [imagePromptDataMap, setImagePromptDataMap] = useState<Record<string, string[]>>({})
+  const [scrollAnchorMessageId, setScrollAnchorMessageId] = useState<string | null>(null)
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
+  const [pendingClearChats, setPendingClearChats] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const noticeTimerRef = useRef<number | null>(null)
@@ -1740,14 +3162,56 @@ function App() {
     }
   }
 
-  const getConversationLink = (conversationId: string) => {
+  const getConversationLink = (shareToken: string) => {
     const url = new URL(window.location.href)
-    url.searchParams.set('c', conversationId)
+    url.pathname = `/shared/${encodeURIComponent(shareToken)}`
+    url.search = ''
+    url.hash = ''
     return url.toString()
   }
 
+  const ensureConversationIsShared = async (conversationId: string) => {
+    if (!supabase) return null
+
+    const existing = conversations.find((item) => item.id === conversationId)
+    if (existing?.is_shared && existing.share_token) {
+      return existing.share_token
+    }
+
+    const token = createShareToken()
+
+    const { data: updatedConversation, error: shareError } = await supabase
+      .from('conversations')
+      .update({ is_shared: true, share_token: token })
+      .eq('id', conversationId)
+      .select('id, is_shared, share_token')
+      .single()
+
+    if (shareError || !updatedConversation?.share_token) {
+      setError(shareError?.message || 'Could not create a public share link.')
+      return null
+    }
+
+    setConversations((prev) =>
+      prev.map((item) =>
+        item.id === conversationId
+          ? {
+              ...item,
+              is_shared: updatedConversation.is_shared,
+              share_token: updatedConversation.share_token,
+            }
+          : item,
+      ),
+    )
+
+    return updatedConversation.share_token as string
+  }
+
   const onShareConversation = async (conversationId: string) => {
-    const url = getConversationLink(conversationId)
+    const shareToken = await ensureConversationIsShared(conversationId)
+    if (!shareToken) return
+
+    const url = getConversationLink(shareToken)
     const title =
       conversations.find((item) => item.id === conversationId)?.title ||
       'Llama AI Conversation'
@@ -1788,6 +3252,7 @@ function App() {
     nextEnterToSend: boolean,
     nextSuggestionCount: 4 | 6,
     nextVoiceLanguage: VoiceLanguage,
+    nextReadVoiceUri: string,
     nextConfirmClearChats: boolean,
   ) => {
     if (!session?.user) return
@@ -1795,6 +3260,7 @@ function App() {
     setEnterToSend(nextEnterToSend)
     setSuggestionCount(nextSuggestionCount)
     setVoiceLanguage(nextVoiceLanguage)
+    setReadVoiceUri(nextReadVoiceUri)
     setConfirmClearChats(nextConfirmClearChats)
 
     localStorage.setItem(`enter-to-send:${session.user.id}`, String(nextEnterToSend))
@@ -1803,6 +3269,7 @@ function App() {
       String(nextSuggestionCount),
     )
     localStorage.setItem(`voice-language:${session.user.id}`, nextVoiceLanguage)
+    localStorage.setItem(`read-voice-uri:${session.user.id}`, nextReadVoiceUri)
     localStorage.setItem(
       `confirm-clear-chats:${session.user.id}`,
       String(nextConfirmClearChats),
@@ -1857,6 +3324,7 @@ function App() {
     const storedEnterToSend = localStorage.getItem(`enter-to-send:${keyPrefix}`)
     const storedSuggestionCount = localStorage.getItem(`suggestion-count:${keyPrefix}`)
     const storedVoiceLanguage = localStorage.getItem(`voice-language:${keyPrefix}`)
+    const storedReadVoiceUri = localStorage.getItem(`read-voice-uri:${keyPrefix}`)
     const storedConfirmClear = localStorage.getItem(`confirm-clear-chats:${keyPrefix}`)
 
     setDisplayName(
@@ -1884,14 +3352,13 @@ function App() {
 
     const resolvedSuggestionCount: 4 | 6 = storedSuggestionCount === '6' ? 6 : 4
     const resolvedVoiceLanguage: VoiceLanguage =
-      storedVoiceLanguage === 'en-GB' || storedVoiceLanguage === 'hi-IN'
-        ? storedVoiceLanguage
-        : 'en-US'
+      storedVoiceLanguage === 'en-GB' ? 'en-GB' : 'en-US'
 
     setPromptPurpose(resolvedPurpose)
     setEnterToSend(storedEnterToSend !== 'false')
     setSuggestionCount(resolvedSuggestionCount)
     setVoiceLanguage(resolvedVoiceLanguage)
+    setReadVoiceUri(storedReadVoiceUri || 'default')
     setConfirmClearChats(storedConfirmClear !== 'false')
     setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
   }, [session?.user])
@@ -1944,12 +3411,14 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const isSharedRoute = location.pathname.startsWith('/shared/')
+    const isLandingRoute = location.pathname === '/'
     if (booting) return
     if (session && location.pathname === '/auth') {
       navigate('/chat', { replace: true })
       return
     }
-    if (!session && location.pathname !== '/auth') {
+    if (!session && location.pathname !== '/auth' && !isSharedRoute && !isLandingRoute) {
       navigate('/auth', { replace: true })
     }
   }, [session, booting, location.pathname, navigate])
@@ -1959,6 +3428,9 @@ function App() {
       setConversations([])
       setActiveConversationId(null)
       setMessagesMap({})
+      setImageDataMap({})
+      setImageTagDataMap({})
+      setImagePromptDataMap({})
       return
     }
 
@@ -2013,10 +3485,6 @@ function App() {
     void loadMessages()
   }, [activeConversationId, messagesMap, supabase])
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [activeMessages.length, isGenerating, streamTick, isThinking])
-
   const refreshMessages = async (
     conversationId: string,
     preserveStreamedMessages = false,
@@ -2033,9 +3501,10 @@ function App() {
       setError(loadError.message)
       return
     }
-
     const fetchedMessages = (data || []) as ChatMessage[]
+    const previousMessages = messagesMap[conversationId] || []
     let skippedUpdate = false
+    let needsAssistantRetry = false
 
     setMessagesMap((prev) => {
       const currentMessages = prev[conversationId] || []
@@ -2049,6 +3518,14 @@ function App() {
           (message) =>
             message.role === 'assistant' && message.content.trim().length > 0,
         )
+        const fetchedHasAssistantMessage = fetchedMessages.some(
+          (message) => message.role === 'assistant',
+        )
+
+        // Sometimes DB replication briefly returns an empty assistant placeholder.
+        if (fetchedHasAssistantMessage && !fetchedHasAssistantContent) {
+          needsAssistantRetry = true
+        }
 
         // Avoid wiping a just-streamed answer when DB replication is a beat behind.
         if (
@@ -2070,6 +3547,25 @@ function App() {
       window.setTimeout(() => {
         void refreshMessages(conversationId)
       }, 450)
+    } else {
+      const remappedImageEntries = mapImageDataToFetchedMessageIds(
+        previousMessages,
+        fetchedMessages,
+        imageDataMap,
+      )
+
+      if (Object.keys(remappedImageEntries).length > 0) {
+        setImageDataMap((prev) => ({
+          ...prev,
+          ...remappedImageEntries,
+        }))
+      }
+
+      if (preserveStreamedMessages && needsAssistantRetry) {
+        window.setTimeout(() => {
+          void refreshMessages(conversationId)
+        }, 450)
+      }
     }
 
     return fetchedMessages
@@ -2092,7 +3588,6 @@ function App() {
     if (loadError || !latestAssistantRows || latestAssistantRows.length === 0) {
       return
     }
-
     const latestAssistantId = latestAssistantRows[0]?.id as string | undefined
     if (!latestAssistantId) return
 
@@ -2177,12 +3672,54 @@ function App() {
     return createConversation()
   }
 
-  const sendMessage = async (input: string, imageFile?: File | null, imageDataUrl?: string | null) => {
+  const deleteDuplicateRegeneratePrompt = async (
+    conversationId: string,
+    regeneratePromptContent: string,
+    originalPromptMessageId?: string,
+  ) => {
+    if (!supabase) return
+
+    const { data: duplicateRows } = await supabase
+      .from('messages')
+      .select('id, created_at')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'user')
+      .eq('content', regeneratePromptContent)
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    const duplicateIds = (duplicateRows || [])
+      .map((row) => row.id as string)
+      .filter((rowId) => !originalPromptMessageId || rowId !== originalPromptMessageId)
+
+    if (duplicateIds.length === 0) return
+
+    await supabase
+      .from('messages')
+      .delete()
+      .in('id', duplicateIds)
+      .eq('conversation_id', conversationId)
+  }
+
+  const sendMessage = async (
+    input: string,
+    imageFile?: File | null,
+    imageDataUrl?: string | null,
+    options?: GenerationOptions,
+  ) => {
     if (!supabase || !session?.user) return
 
     const prompt = input.trim()
     if ((!prompt && !imageFile) || isGenerating) return
     const promptForRequest = prompt || 'Analyze this image'
+    const isRegenerate = options?.isRegenerate === true
+    const replaceAssistantMessageId = options?.replaceAssistantMessageId
+    const replaceAssistantCreatedAt = options?.replaceAssistantCreatedAt
+    const replaceAssistantContent = options?.replaceAssistantContent
+    const overrideModel = options?.overrideModel ?? selectedModel
+    const anchorMessageId = options?.anchorMessageId
+    const originalPromptMessageId = options?.originalPromptMessageId
+    const regeneratePromptContent = options?.regeneratePromptContent
 
     let conversationId = await ensureConversation()
     if (!conversationId) return
@@ -2198,6 +3735,58 @@ function App() {
     moveConversationToTop(conversationId)
 
     navigate(`/chat/${slugify(promptForRequest)}?c=${conversationId}`)
+
+    if (isRegenerate && replaceAssistantMessageId) {
+      setMessagesMap((prev) => ({
+        ...prev,
+        [conversationId]: (prev[conversationId] || []).filter(
+          (message) => message.id !== replaceAssistantMessageId,
+        ),
+      }))
+
+      let deletedFromDb = false
+
+      if (isUuid(replaceAssistantMessageId)) {
+        const { data: deletedRows } = await supabase
+          .from('messages')
+          .delete()
+          .eq('id', replaceAssistantMessageId)
+          .eq('conversation_id', conversationId)
+          .eq('role', 'assistant')
+          .select('id')
+
+        deletedFromDb = Boolean(deletedRows && deletedRows.length > 0)
+      }
+
+      if (!deletedFromDb && replaceAssistantContent) {
+        const { data: fallbackRows } = await supabase
+          .from('messages')
+          .select('id, created_at')
+          .eq('conversation_id', conversationId)
+          .eq('role', 'assistant')
+          .eq('content', replaceAssistantContent)
+          .order('created_at', { ascending: false })
+          .limit(10)
+
+        let fallbackId =
+          (fallbackRows || []).find(
+            (row) => row.created_at === replaceAssistantCreatedAt,
+          )?.id as string | undefined
+
+        if (!fallbackId) {
+          fallbackId = fallbackRows?.[0]?.id as string | undefined
+        }
+
+        if (fallbackId) {
+          await supabase
+            .from('messages')
+            .delete()
+            .eq('id', fallbackId)
+            .eq('conversation_id', conversationId)
+            .eq('role', 'assistant')
+        }
+      }
+    }
 
     const userContent = imageFile
       ? prompt
@@ -2220,20 +3809,35 @@ function App() {
         ...prev,
         [userId]: imageDataUrl,
       }))
+      const imageTagKey = `${conversationId}::${imageFile.name.trim().toLowerCase()}`
+      setImageTagDataMap((prev) => ({
+        ...prev,
+        [imageTagKey]: imageDataUrl,
+      }))
+      const promptSignature = getPromptSignatureValue(prompt)
+      const promptKey = `${conversationId}::${promptSignature}`
+      setImagePromptDataMap((prev) => ({
+        ...prev,
+        [promptKey]: [...(prev[promptKey] || []), imageDataUrl],
+      }))
     }
 
     setError('')
-    setDraft('')
+    if (!isRegenerate) {
+      setDraft('')
+    }
 
     const isFirstMessage = (messagesMap[conversationId] || []).length === 0
-    if (isFirstMessage) {
+    if (isFirstMessage && !isRegenerate) {
       void updateConversationTitle(conversationId, deriveTitle(promptForRequest))
     }
 
-    setMessagesMap((prev) => ({
-      ...prev,
-      [conversationId]: [...(prev[conversationId] || []), userMessage],
-    }))
+    if (!isRegenerate) {
+      setMessagesMap((prev) => ({
+        ...prev,
+        [conversationId]: [...(prev[conversationId] || []), userMessage],
+      }))
+    }
 
     const assistantId = safeId('assistant')
     let assistantBuffer = ''
@@ -2243,7 +3847,7 @@ function App() {
       conversation_id: conversationId,
       role: 'assistant',
       content: '',
-      model: selectedModel,
+      model: overrideModel,
       created_at: new Date().toISOString(),
     }
 
@@ -2258,6 +3862,9 @@ function App() {
     setGeneratingConversationId(conversationId)
     setIsAnalyzingImage(Boolean(imageFile))
     setIsThinking(!imageFile)
+
+    setScrollAnchorMessageId(isRegenerate ? anchorMessageId || null : userId)
+
     let hasFirstToken = false
     let hasVisionDone = false
 
@@ -2302,7 +3909,7 @@ function App() {
           },
         )
       } else {
-        const endpoint = MODEL_ENDPOINTS[selectedModel]
+        const endpoint = MODEL_ENDPOINTS[overrideModel]
         const apiUrl = `${API_BASE}${endpoint}`
         await streamCompletion(
           apiUrl,
@@ -2354,12 +3961,24 @@ function App() {
       setIsAnalyzingImage(false)
       setIsThinking(false)
       abortRef.current = null
+      if (isRegenerate && regeneratePromptContent) {
+        await deleteDuplicateRegeneratePrompt(
+          conversationId,
+          regeneratePromptContent,
+          originalPromptMessageId,
+        )
+      }
       await refreshMessages(conversationId, true)
-      await persistModelForLatestAssistantMessage(conversationId, selectedModel)
+      await persistModelForLatestAssistantMessage(conversationId, overrideModel)
     }
   }
 
-  const onSendOrStop = async (input: string, imageFile?: File | null, imageDataUrl?: string | null) => {
+  const onSendOrStop = async (
+    input: string,
+    imageFile?: File | null,
+    imageDataUrl?: string | null,
+    options?: GenerationOptions,
+  ) => {
     if (isGenerating) {
       const conversationId = generatingConversationId
       abortRef.current?.abort()
@@ -2377,22 +3996,32 @@ function App() {
       return
     }
 
-    await sendMessage(input, imageFile, imageDataUrl)
+    await sendMessage(input, imageFile, imageDataUrl, options)
   }
 
   const onNewChat = async () => {
     if (isGenerating) return
+    setActiveConversationId(null)
+    setDraft('')
+    setError('')
+    setSidebarOpen(false)
     refreshPromptCards()
-    await createConversation()
+    navigate('/chat/new-chat')
   }
 
   const onClearChats = async () => {
     if (!supabase || !session?.user) return
 
     if (confirmClearChats) {
-      const accepted = window.confirm('Clear all chats? This cannot be undone.')
-      if (!accepted) return
+      setPendingClearChats(true)
+      return
     }
+
+    await performClearChats()
+  }
+
+  const performClearChats = async () => {
+    if (!supabase || !session?.user) return
 
     const ids = conversations.map((item) => item.id)
     if (ids.length > 0) {
@@ -2403,14 +4032,31 @@ function App() {
 
     setConversations([])
     setMessagesMap({})
+    setImageDataMap({})
+    setImageTagDataMap({})
+    setImagePromptDataMap({})
     setActiveConversationId(null)
     navigate('/chat')
   }
 
+  const onCancelClearChats = () => {
+    setPendingClearChats(false)
+  }
+
+  const onConfirmClearChats = async () => {
+    setPendingClearChats(false)
+    await performClearChats()
+  }
+
   const onShareMessage = async (content: string) => {
-    const link = activeConversationId
-      ? getConversationLink(activeConversationId)
-      : window.location.origin
+    let link = window.location.origin
+
+    if (activeConversationId) {
+      const shareToken = await ensureConversationIsShared(activeConversationId)
+      if (shareToken) {
+        link = getConversationLink(shareToken)
+      }
+    }
 
     if (navigator.share) {
       try {
@@ -2498,6 +4144,26 @@ function App() {
       delete copy[conversationId]
       return copy
     })
+    setImageTagDataMap((prev) => {
+      const next: Record<string, string> = {}
+      const keyPrefix = `${conversationId}::`
+      for (const [key, value] of Object.entries(prev)) {
+        if (!key.startsWith(keyPrefix)) {
+          next[key] = value
+        }
+      }
+      return next
+    })
+    setImagePromptDataMap((prev) => {
+      const next: Record<string, string[]> = {}
+      const keyPrefix = `${conversationId}::`
+      for (const [key, value] of Object.entries(prev)) {
+        if (!key.startsWith(keyPrefix)) {
+          next[key] = value
+        }
+      }
+      return next
+    })
 
     if (activeConversationId === conversationId) {
       const nextActive = nextConversations[0]?.id || null
@@ -2518,88 +4184,123 @@ function App() {
     conversations.find((conv) => conv.id === pendingDeleteConversationId)?.title || null
 
   return (
-    <Routes>
-      <Route path="/auth" element={booting ? <div className="screen-loader">Loading...</div> : session ? <Navigate to="/chat" replace /> : <AuthScreen />} />
-      <Route
-        path="/chat/:querySlug?"
-        element={
-          booting ? (
-            <div className="screen-loader">Loading...</div>
-          ) : !session ? (
-            <Navigate to="/auth" replace />
-          ) : (
-            <ChatWorkspace
-              conversations={conversations}
-              activeConversationId={activeConversationId}
-              activeConversationModel={activeConversationModel}
-              activeMessages={activeMessages}
-              promptPurpose={promptPurpose}
-              promptCards={promptCards}
-              draft={draft}
-              selectedModel={selectedModel}
-              enterToSend={enterToSend}
-              voiceLanguage={voiceLanguage}
-              isAnalyzingImage={isAnalyzingImage}
-              isGenerating={isGenerating}
-              generatingConversationId={generatingConversationId}
-              error={error}
-              notice={notice}
-              pendingDeleteTitle={pendingDeleteTitle}
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-              setDraft={setDraft}
-              setSelectedModel={setSelectedModel}
-              onSendOrStop={onSendOrStop}
-              sendMessage={sendMessage}
-              onNewChat={onNewChat}
-              onShareMessage={onShareMessage}
-              onShareConversation={onShareConversation}
-              onDeleteConversationRequest={onDeleteConversationRequest}
-              onConfirmDeleteConversation={onConfirmDeleteConversation}
-              onCancelDeleteConversation={onCancelDeleteConversation}
-              onSelectConversation={onSelectConversation}
-              endRef={endRef}
-              imageDataMap={imageDataMap}
-            />
-          )
-        }
-      />
-      <Route
-        path="/dashboard"
-        element={
-          booting ? (
-            <div className="screen-loader">Loading...</div>
-          ) : !session ? (
-            <Navigate to="/auth" replace />
-          ) : (
-            <Dashboard
-              email={session.user.email || 'unknown'}
-              userId={session.user.id}
-              joinedAt={new Date(session.user.created_at).toLocaleDateString()}
-              totalConversations={conversations.length}
-              totalMessages={Object.values(messagesMap).reduce(
-                (sum, items) => sum + items.length,
-                0,
-              )}
-              theme={theme}
-              setTheme={setTheme}
-              displayName={displayName}
-              responseStyle={responseStyle}
-              promptPurpose={promptPurpose}
-              enterToSend={enterToSend}
-              suggestionCount={suggestionCount}
-              voiceLanguage={voiceLanguage}
-              confirmClearChats={confirmClearChats}
-              onSavePersonalization={onSavePersonalization}
-              onSaveExperienceSettings={onSaveExperienceSettings}
-              onClearChats={onClearChats}
-              onLogout={onLogout}
-            />
-          )
-        }
-      />
-      <Route path="*" element={<Navigate to={session ? '/chat' : '/auth'} replace />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            booting ? <div className="screen-loader">Loading...</div> : <LandingPage session={session} />
+          }
+        />
+        <Route path="/auth" element={booting ? <div className="screen-loader">Loading...</div> : session ? <Navigate to="/chat" replace /> : <AuthScreen />} />
+        <Route
+          path="/shared/:shareToken"
+          element={booting ? <div className="screen-loader">Loading...</div> : <SharedConversationView />}
+        />
+        <Route
+          path="/chat/:querySlug?"
+          element={
+            booting ? (
+              <div className="screen-loader">Loading...</div>
+            ) : !session ? (
+              <Navigate to="/auth" replace />
+            ) : (
+              <ChatWorkspace
+                conversations={conversations}
+                activeConversationId={activeConversationId}
+                activeConversationModel={activeConversationModel}
+                activeMessages={activeMessages}
+                scrollAnchorMessageId={scrollAnchorMessageId}
+                promptPurpose={promptPurpose}
+                promptCards={promptCards}
+                draft={draft}
+                selectedModel={selectedModel}
+                enterToSend={enterToSend}
+                voiceLanguage={voiceLanguage}
+                readVoiceUri={readVoiceUri}
+                isAnalyzingImage={isAnalyzingImage}
+                isGenerating={isGenerating}
+                generatingConversationId={generatingConversationId}
+                error={error}
+                notice={notice}
+                pendingDeleteTitle={pendingDeleteTitle}
+                sidebarOpen={sidebarOpen}
+                setSidebarOpen={setSidebarOpen}
+                setDraft={setDraft}
+                setSelectedModel={setSelectedModel}
+                onSendOrStop={onSendOrStop}
+                sendMessage={sendMessage}
+                onNewChat={onNewChat}
+                onShareMessage={onShareMessage}
+                onShareConversation={onShareConversation}
+                onDeleteConversationRequest={onDeleteConversationRequest}
+                onConfirmDeleteConversation={onConfirmDeleteConversation}
+                onCancelDeleteConversation={onCancelDeleteConversation}
+                onSelectConversation={onSelectConversation}
+                endRef={endRef}
+                imageDataMap={imageDataMap}
+                imageTagDataMap={imageTagDataMap}
+                imagePromptDataMap={imagePromptDataMap}
+              />
+            )
+          }
+        />
+        <Route
+          path="/dashboard"
+          element={
+            booting ? (
+              <div className="screen-loader">Loading...</div>
+            ) : !session ? (
+              <Navigate to="/auth" replace />
+            ) : (
+              <Dashboard
+                email={session.user.email || 'unknown'}
+                userId={session.user.id}
+                joinedAt={new Date(session.user.created_at).toLocaleDateString()}
+                totalConversations={conversations.length}
+                totalMessages={Object.values(messagesMap).reduce(
+                  (sum, items) => sum + items.length,
+                  0,
+                )}
+                theme={theme}
+                setTheme={setTheme}
+                displayName={displayName}
+                responseStyle={responseStyle}
+                promptPurpose={promptPurpose}
+                enterToSend={enterToSend}
+                suggestionCount={suggestionCount}
+                voiceLanguage={voiceLanguage}
+                readVoiceUri={readVoiceUri}
+                confirmClearChats={confirmClearChats}
+                onSavePersonalization={onSavePersonalization}
+                onSaveExperienceSettings={onSaveExperienceSettings}
+                onClearChats={onClearChats}
+                onLogout={onLogout}
+              />
+            )
+          }
+        />
+        <Route path="*" element={<Navigate to={session ? '/chat' : '/'} replace />} />
+      </Routes>
+
+      {pendingClearChats && (
+        <div className="modal-backdrop" onClick={onCancelClearChats}>
+          <div className="confirm-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>Clear all chats?</h3>
+            <p>This will permanently remove all conversations and messages.</p>
+            <div className="confirm-actions">
+              <button className="ghost-button confirm-action" onClick={onCancelClearChats}>
+                Cancel
+              </button>
+              <button className="settings-item danger confirm-action" onClick={() => void onConfirmClearChats()}>
+                <Trash2 size={14} />
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
