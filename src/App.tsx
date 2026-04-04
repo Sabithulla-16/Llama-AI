@@ -1295,7 +1295,7 @@ function AuthScreen() {
           <section className="auth-marketing">
             <div className="auth-orb auth-orb-one" />
             <div className="auth-orb auth-orb-two" />
-            <img className="auth-logo-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+            <img className="auth-logo-mark" src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
             <p className="auth-eyebrow">Llama AI Workspace</p>
             <h1>Intelligence, organized.</h1>
             <p className="muted-text">
@@ -1440,7 +1440,7 @@ function LandingPage({ session }: LandingPageProps) {
       <div className="landing-noise" aria-hidden="true" />
       <header className="landing-topbar">
         <div className="landing-brand">
-          <img className="landing-brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+          <img className="landing-brand-mark" src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
           <p>Llama AI</p>
         </div>
       </header>
@@ -2015,7 +2015,7 @@ function ChatWorkspace({
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${isGenerating ? 'streaming' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-brand">
-            <img className="sidebar-brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+            <img className="sidebar-brand-mark" src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
             <p>Llama AI</p>
           </div>
           <button className="icon-button" onClick={() => setSidebarOpen(false)}>
@@ -2991,7 +2991,7 @@ function SharedConversationView() {
         <header className="shared-head">
           <div className="shared-head-copy">
             <div className="shared-brand">
-              <img className="shared-brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
+              <img className="shared-brand-mark" src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
               <p>Shared Link</p>
             </div>
             <h2>{title}</h2>
