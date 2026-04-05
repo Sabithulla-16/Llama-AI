@@ -11,9 +11,11 @@ import {
   SiC,
   SiCss,
   SiDotnet,
+  SiGmail,
   SiGo,
   SiGnubash,
   SiHtml5,
+  SiImessage,
   SiJavascript,
   SiJson,
   SiKotlin,
@@ -27,7 +29,9 @@ import {
   SiRust,
   SiSass,
   SiSwift,
+  SiTelegram,
   SiTypescript,
+  SiWhatsapp,
   SiYaml,
 } from 'react-icons/si'
 import {
@@ -39,6 +43,8 @@ import {
   useParams,
 } from 'react-router-dom'
 import {
+  ArrowDown,
+  ArrowLeft,
   Menu,
   MessageSquarePlus,
   Cpu,
@@ -48,11 +54,14 @@ import {
   Pause,
   Copy,
   Share2,
+  Link2,
   Download,
   Eye,
   EyeOff,
   RotateCcw,
+  Keyboard,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Mic,
   SendHorizontal,
@@ -60,12 +69,18 @@ import {
   ImagePlus,
   LayoutDashboard,
   Trash2,
-  LogIn,
   LogOut,
   Sun,
   Moon,
   X,
   Volume2,
+  Sparkles,
+  Palette,
+  Shield,
+  Mail,
+  Lock,
+  User,
+  MoreHorizontal,
 } from 'lucide-react'
 
 type Role = 'user' | 'assistant'
@@ -105,6 +120,14 @@ type GenerationOptions = {
   regeneratePromptContent?: string
 }
 
+type ConversationGroupKey = 'today' | 'yesterday' | 'previous7' | 'older'
+
+type ShareDialogData = {
+  title: string
+  url: string
+  createdAt: string
+}
+
 const API_BASE =
   ((import.meta.env.VITE_API_BASE_URL as string | undefined) ||
     'https://valtry-llama3-2-3b-quantized.hf.space').replace(/\/+$/, '')
@@ -116,13 +139,6 @@ const MODEL_ENDPOINTS: Record<AIModel, string> = {
   coder: '/v1/chat/coder',
   mini: '/v1/chat/mini',
   smart: '/v1/chat/smart',
-}
-const MODEL_LABELS: Record<AIModel, string> = {
-  llama: 'General',
-  qwen: 'Fast',
-  coder: 'Coding',
-  mini: 'Very Fast',
-  smart: 'Fast + Smart',
 }
 const MODEL_ENGINE_LABELS: Record<AIModel, string> = {
   llama: 'Llama',
@@ -182,6 +198,39 @@ const PURPOSE_PROMPTS: Record<PromptPurpose, string[]> = {
     'Tone improve',
     'Proofread text',
   ],
+}
+
+const PROMPT_HELP_TEXT: Record<string, string> = {
+  'Explain AI': 'Understand how artificial intelligence works in simple terms.',
+  'Plan my day': 'Organize your tasks, priorities, and schedule quickly.',
+  'Summarize text': 'Get concise summaries for articles or long notes.',
+  'Give ideas': 'Generate creative ideas for projects or problem solving.',
+  'Meeting notes': 'Convert rough notes into clean actionable summaries.',
+  'Quick checklist': 'Create a practical checklist for your next task.',
+  'Write Python': 'Generate clean Python code for your requirement.',
+  'Fix bug fast': 'Get likely fixes and debugging steps quickly.',
+  'Regex help': 'Build and explain regular expressions clearly.',
+  'SQL query': 'Write or improve SQL queries for your data.',
+  'Refactor code': 'Improve readability and structure with safer refactors.',
+  'Code review': 'Review code for bugs, risks, and improvements.',
+  'Startup ideas': 'Brainstorm startup concepts with clear market opportunities.',
+  'Product copy': 'Create compelling product descriptions and value-focused copy.',
+  'Landing page': 'Draft high-converting landing page sections and messaging.',
+  'Pitch outline': 'Build a persuasive pitch structure for your idea.',
+  'Roadmap draft': 'Turn goals into a simple milestone-based execution roadmap.',
+  'Market angle': 'Identify positioning angles to stand out from competitors.',
+  'Study plan': 'Create a structured plan with topics and daily targets.',
+  'Concept notes': 'Summarize key concepts into clear, revision-friendly notes.',
+  'Quiz me': 'Generate quiz questions to test your understanding quickly.',
+  'Explain simply': 'Break complex topics into easy, plain-language explanations.',
+  'Revision list': 'Build a focused revision checklist before exams or deadlines.',
+  'Topic summary': 'Condense a topic into concise, high-yield takeaways.',
+  'Email draft': 'Write a polished email with the right tone and clarity.',
+  'Rewrite concise': 'Rewrite your text to be shorter and more impactful.',
+  'Blog outline': 'Generate a clear blog structure with strong section flow.',
+  'Headline ideas': 'Create headline options optimized for clarity and click-through.',
+  'Tone improve': 'Adjust writing tone to match audience and context.',
+  'Proofread text': 'Fix grammar, clarity, and style issues in your writing.',
 }
 
 const PURPOSE_LABELS: Record<PromptPurpose, string> = {
@@ -294,7 +343,7 @@ function CustomDropdown<T extends string>({
     options.find((option) => option.value === value) || options[0]
 
   return (
-    <div className="model-dropdown">
+    <div className={`model-dropdown ${isOpen ? 'open' : ''}`}>
       <button
         ref={triggerRef}
         type="button"
@@ -399,7 +448,7 @@ function VoiceDropdown({
     options.find((option) => option.value === value) || options[0]
 
   return (
-    <div className="model-dropdown">
+    <div className={`model-dropdown ${isOpen ? 'open' : ''}`}>
       <button
         ref={triggerRef}
         type="button"
@@ -462,6 +511,30 @@ function pickRandomPrompts(purpose: PromptPurpose, count = 4) {
   const shuffled = [...pool].sort(() => Math.random() - 0.5)
   return shuffled.slice(0, count)
 }
+
+const CONVERSATION_GROUP_LABELS: Record<ConversationGroupKey, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  previous7: 'Previous 7 Days',
+  older: 'More than 7 Days',
+}
+
+function getConversationGroupKey(createdAt: string, now = new Date()): ConversationGroupKey {
+  const createdDate = new Date(createdAt)
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startCreated = new Date(
+    createdDate.getFullYear(),
+    createdDate.getMonth(),
+    createdDate.getDate(),
+  )
+  const diffDays = Math.floor((startToday.getTime() - startCreated.getTime()) / 86_400_000)
+
+  if (diffDays <= 0) return 'today'
+  if (diffDays === 1) return 'yesterday'
+  if (diffDays <= 7) return 'previous7'
+  return 'older'
+}
+
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -1289,67 +1362,86 @@ function AuthScreen() {
   }
 
   return (
-    <div className="auth-wrap">
-      <div className="auth-card">
-        <div className="auth-layout">
-          <section className="auth-marketing">
-            <div className="auth-orb auth-orb-one" />
-            <div className="auth-orb auth-orb-two" />
-            <img className="auth-logo-mark" src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
-            <p className="auth-eyebrow">Llama AI Workspace</p>
-            <h1>Intelligence, organized.</h1>
-            <p className="muted-text">
-              Sign in to a premium chat system for fast conversations, shared links,
-              and saved context.
+    <div className="auth-wrap auth-v2">
+      <div className="auth-v2-bg auth-v2-bg-desktop" aria-hidden="true" />
+      <div className="auth-v2-bg auth-v2-bg-mobile" aria-hidden="true" />
+
+      <header className="auth-v2-topbar">
+        <div className="auth-v2-brand">
+          <img src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
+          <p>
+            Llama <span>AI</span>
+          </p>
+        </div>
+
+        <nav className="auth-v2-nav" aria-label="Auth page navigation">
+          <span>Features</span>
+          <span>Use Cases</span>
+          <span>Pricing</span>
+          <span>Docs</span>
+          <span>Contact</span>
+        </nav>
+
+        <div className="auth-v2-actions">
+          <button type="button" className="auth-v2-link" onClick={() => setIsSignUp(false)}>
+            Log in
+          </button>
+          <button type="button" className="auth-v2-cta" onClick={() => setIsSignUp(true)}>
+            Get Started
+          </button>
+        </div>
+      </header>
+
+      <main className="auth-v2-main">
+        <section className="auth-v2-hero">
+          <img src="/llama_logo_transparent.png" alt="Llama AI" className="auth-v2-logo" />
+          <h1>
+            Llama <span>AI</span>
+          </h1>
+          <p className="auth-v2-subtitle">
+            {isSignUp ? 'Create an account' : 'Welcome Back'}
+          </p>
+        </section>
+
+        <section className="auth-v2-card">
+          {!supabase && (
+            <p className="error-text">
+              Missing Supabase keys. Set VITE_SUPABASE_URL and
+              VITE_SUPABASE_ANON_KEY.
             </p>
+          )}
 
-            <div className="auth-visual">
-              <div className="auth-visual-card auth-visual-card-one">
-                <span className="auth-visual-line auth-line-long" />
-                <span className="auth-visual-line auth-line-medium" />
-                <span className="auth-visual-line auth-line-short" />
-              </div>
-              <div className="auth-visual-card auth-visual-card-two">
-                <span className="auth-visual-line auth-line-short" />
-                <span className="auth-visual-line auth-line-long" />
-              </div>
+          {authPopup && (
+            <div className={`auth-popup ${authPopup.type}`} role="alert">
+              {authPopup.message}
             </div>
-          </section>
+          )}
 
-          <section className="auth-panel">
-            <div className="auth-panel-head">
-              <div>
-                <p className="auth-panel-kicker">Secure access</p>
-                <h2>{isSignUp ? 'Create your account' : 'Welcome back'}</h2>
-              </div>
-            </div>
+          <button
+            type="button"
+            onClick={onGoogle}
+            className="auth-v2-google"
+            disabled={pending || !supabase}
+          >
+            <svg className="auth-v2-google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            {isSignUp ? 'Sign up with Google' : 'Continue with Google'}
+          </button>
 
-            {!supabase && (
-              <p className="error-text">
-                Missing Supabase keys. Set VITE_SUPABASE_URL and
-                VITE_SUPABASE_ANON_KEY.
-              </p>
-            )}
+          <div className="auth-v2-divider" aria-hidden="true">
+            <span />
+            <em>or</em>
+            <span />
+          </div>
 
-            {authPopup && (
-              <div className={`auth-popup ${authPopup.type}`} role="alert">
-                {authPopup.message}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={onGoogle}
-              className="primary-button"
-              disabled={pending || !supabase}
-            >
-              Continue with Google
-            </button>
-
-            <div className="divider">or</div>
-
-            <form onSubmit={onEmail} className="auth-form">
-              {isSignUp && (
+          <form onSubmit={onEmail} className="auth-v2-form">
+            {isSignUp && (
+              <div className="auth-v2-input-wrap">
+                <User size={18} />
                 <input
                   type="text"
                   placeholder="Username"
@@ -1358,64 +1450,79 @@ function AuthScreen() {
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
                 />
-              )}
+              </div>
+            )}
+
+            <div className="auth-v2-input-wrap">
+              <Mail size={18} />
               <input
                 type="email"
-                placeholder="Email"
+                placeholder="Email ID"
                 required
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
               />
-              <div className="password-field">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Password"
-                  required
-                  minLength={6}
-                  value={password}
-                  onChange={(event) => {
-                    const nextPassword = event.target.value
-                    setPassword(nextPassword)
-                    if (nextPassword.length === 0) {
-                      setShowPassword(false)
-                    }
-                  }}
-                />
-                {password.length > 0 && (
-                  <button
-                    type="button"
-                    className="password-toggle"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                )}
-              </div>
+            </div>
 
-              <button
-                type="submit"
-                className="secondary-button"
-                disabled={pending || !supabase}
-              >
-                {pending ? 'Please wait...' : isSignUp ? 'Create account' : 'Sign in'}
-              </button>
-            </form>
+            <div className="auth-v2-input-wrap auth-v2-password-wrap">
+              <Lock size={18} />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Password"
+                required
+                minLength={6}
+                value={password}
+                onChange={(event) => {
+                  const nextPassword = event.target.value
+                  setPassword(nextPassword)
+                  if (nextPassword.length === 0) {
+                    setShowPassword(false)
+                  }
+                }}
+              />
+              {password.length > 0 && (
+                <button
+                  type="button"
+                  className="auth-v2-password-toggle"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              )}
+            </div>
 
             <button
               type="button"
-              className="text-button"
-              onClick={() => setIsSignUp((prev) => !prev)}
+              className="auth-v2-forgot"
+              onClick={() => showAuthPopup('error', 'Password reset flow will be added soon.')}
             >
-              {isSignUp
-                ? 'Already have an account? Sign in'
-                : "Don't have an account? Create one"}
+              Forgot password?
             </button>
-          </section>
-        </div>
 
-      </div>
+            <button
+              type="submit"
+              className="auth-v2-submit"
+              disabled={pending || !supabase}
+            >
+              {pending ? 'Please wait...' : isSignUp ? 'Sign Up' : 'Login'}
+            </button>
+          </form>
+
+          <button
+            type="button"
+            className="auth-v2-switch"
+            onClick={() => setIsSignUp((prev) => !prev)}
+          >
+            {isSignUp ? (
+              <>Already have an account? <strong>Login</strong></>
+            ) : (
+              <>Don't have an account? <strong>Sign up</strong></>
+            )}
+          </button>
+        </section>
+      </main>
     </div>
   )
 }
@@ -1437,190 +1544,50 @@ function LandingPage({ session }: LandingPageProps) {
 
   return (
     <div className="landing-wrap">
-      <div className="landing-noise" aria-hidden="true" />
+      <div className="landing-background landing-background-desktop" aria-hidden="true" />
+      <div className="landing-background landing-background-mobile" aria-hidden="true" />
+
       <header className="landing-topbar">
         <div className="landing-brand">
           <img className="landing-brand-mark" src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
           <p>Llama AI</p>
         </div>
+
+        <nav className="landing-nav" aria-label="Primary">
+          <span>Features</span>
+          <span>Use Cases</span>
+          <span>Pricing</span>
+          <span>Docs</span>
+          <span>Contact</span>
+        </nav>
+
+        <div className="landing-topbar-actions">
+          <button className="landing-topbar-link" type="button" onClick={secondaryAction}>
+            Log in
+          </button>
+          <button className="landing-nav-button landing-nav-button-strong" type="button" onClick={primaryAction}>
+            Get Started
+          </button>
+        </div>
       </header>
 
       <main className="landing-hero">
-        <section className="landing-copy">
-          <p className="landing-kicker">Practical intelligence studio</p>
-          <h1>
-            Chat faster.
-            <span>Share cleanly.</span>
-            Stay in flow.
-          </h1>
-          <p className="landing-subtext">
-            A focused AI workspace with model-aware responses, image understanding,
-            and one-click public sharing for read-only threads.
-          </p>
-          <div className="landing-actions">
-            <button className="landing-cta-primary" onClick={primaryAction}>
-              <MessageSquarePlus size={16} />
-              {session ? 'Open Workspace' : 'Start Free'}
-            </button>
-            <button className="landing-cta-secondary" onClick={secondaryAction}>
-              <LayoutDashboard size={16} />
-              {session ? 'Open Dashboard' : 'Create Account'}
-            </button>
-          </div>
-        </section>
-
-        <section className="landing-stage" aria-label="Platform highlights">
-          <article className="landing-panel landing-panel-main">
-            <div className="landing-panel-head">
-              <span className="landing-pill">Live</span>
-              <span className="landing-panel-title">Model-aware answers</span>
-            </div>
-            <div className="landing-wave" />
-            <div className="landing-metrics">
-              <div>
-                <strong>5</strong>
-                <span>Engine profiles</span>
-              </div>
-              <div>
-                <strong>1</strong>
-                <span>Tap regenerate</span>
-              </div>
-              <div>
-                <strong>∞</strong>
-                <span>Thread continuity</span>
-              </div>
-            </div>
-          </article>
-
-          <article className="landing-panel landing-panel-mini rotate-left">
-            <Cpu size={16} />
-            <p>Adaptive model labels in every assistant reply.</p>
-          </article>
-
-          <article className="landing-panel landing-panel-mini rotate-right">
-            <Share2 size={16} />
-            <p>Public links open in read-only mode without login.</p>
-          </article>
-        </section>
+        <img className="landing-hero-logo" src="/llama_logo_transparent.png" alt="Llama AI logo" />
+        <h1>
+          Llama <span>AI</span>
+        </h1>
+        <p className="landing-subtext landing-subtext-center">
+          Your intelligent AI assistant
+          <br />
+          for everything you need.
+        </p>
+        <button className="landing-hero-cta" type="button" onClick={primaryAction}>
+          <span>Get Started</span>
+          <span aria-hidden="true" className="landing-hero-arrow">
+            →
+          </span>
+        </button>
       </main>
-
-      <section className="landing-detail-grid" aria-label="Platform details">
-        <article className="landing-detail-card">
-          <p className="landing-detail-kicker">Why teams pick this</p>
-          <h3>Built for real workflows, not toy prompts.</h3>
-          <ul className="landing-detail-list">
-            <li>
-              <Check size={14} />
-              Model labels on each answer for transparency.
-            </li>
-            <li>
-              <Check size={14} />
-              Regenerate keeps your thread context in place.
-            </li>
-            <li>
-              <Check size={14} />
-              Image prompts stay attached to conversation history.
-            </li>
-            <li>
-              <Check size={14} />
-              Shared links are read-only for safer collaboration.
-            </li>
-          </ul>
-        </article>
-
-        <article className="landing-detail-card">
-          <p className="landing-detail-kicker">How it works</p>
-          <h3>Three-step loop from idea to output.</h3>
-          <div className="landing-timeline">
-            <div className="landing-timeline-item">
-              <span>01</span>
-              <p>Start a focused prompt or upload an image.</p>
-            </div>
-            <div className="landing-timeline-item">
-              <span>02</span>
-              <p>Choose the model profile that matches your intent.</p>
-            </div>
-            <div className="landing-timeline-item">
-              <span>03</span>
-              <p>Regenerate, refine, and share the final thread.</p>
-            </div>
-          </div>
-        </article>
-
-        <article className="landing-detail-card landing-detail-cta">
-          <p className="landing-detail-kicker">Ready to launch</p>
-          <h3>Jump into your workspace now.</h3>
-          <p>
-            Continue with Google or email, then begin a new chat immediately.
-          </p>
-          <div className="landing-actions">
-            <button className="landing-cta-primary" onClick={primaryAction}>
-              <MessageSquarePlus size={16} />
-              {session ? 'Go to Chat' : 'Get Started'}
-            </button>
-            <button className="landing-cta-secondary" onClick={() => navigate('/auth')}>
-              <LogIn size={16} />
-              Open Sign In
-            </button>
-          </div>
-        </article>
-      </section>
-
-      <section className="landing-faq-section" aria-label="Frequently asked questions">
-        <div className="landing-faq-head">
-          <p className="landing-detail-kicker">FAQ</p>
-          <h3>Questions answered before you sign in.</h3>
-          <p>
-            A few quick answers about how the workspace behaves and what you can do
-            with shared conversations.
-          </p>
-        </div>
-
-        <div className="landing-faq-list">
-          <details className="landing-faq-item" open>
-            <summary>Can I use it without creating a new workflow?</summary>
-            <p>
-              Yes. Start with chat, upload images, regenerate responses, and share
-              read-only links without changing how you already work.
-            </p>
-          </details>
-          <details className="landing-faq-item">
-            <summary>What happens when I share a conversation?</summary>
-            <p>
-              Shared conversations open in a public read-only page. Recipients can
-              view the thread without logging in and cannot continue it.
-            </p>
-          </details>
-          <details className="landing-faq-item">
-            <summary>Does image input stay attached to the conversation?</summary>
-            <p>
-              Yes. Uploaded images remain tied to the message history, so regenerate
-              and review flows keep the correct context.
-            </p>
-          </details>
-          <details className="landing-faq-item">
-            <summary>Is this optimized for mobile?</summary>
-            <p>
-              The landing page and auth screen are both responsive, and the landing
-              page scrolls naturally on smaller devices.
-            </p>
-          </details>
-        </div>
-      </section>
-
-      <footer className="landing-footer">
-        <div>
-          <p className="landing-footer-brand">Llama AI Workspace</p>
-          <p className="landing-footer-text">
-            Focused chat, public sharing, image prompts, and clean thread management.
-          </p>
-        </div>
-
-        <div className="landing-footer-links">
-          <button onClick={primaryAction}>Open Chat</button>
-          <button onClick={() => navigate('/dashboard')}>Dashboard</button>
-        </div>
-      </footer>
     </div>
   )
 }
@@ -1631,11 +1598,11 @@ type ChatWorkspaceProps = {
   activeConversationModel: AIModel
   activeMessages: ChatMessage[]
   scrollAnchorMessageId: string | null
-  promptPurpose: PromptPurpose
   promptCards: string[]
   draft: string
   selectedModel: AIModel
   enterToSend: boolean
+  readAfterSend: boolean
   voiceLanguage: VoiceLanguage
   readVoiceUri: string
   isAnalyzingImage: boolean
@@ -1679,11 +1646,11 @@ function ChatWorkspace({
   activeConversationModel,
   activeMessages,
   scrollAnchorMessageId,
-  promptPurpose,
   promptCards,
   draft,
   selectedModel,
   enterToSend,
+  readAfterSend,
   voiceLanguage,
   readVoiceUri,
   isAnalyzingImage,
@@ -1733,16 +1700,41 @@ function ChatWorkspace({
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const messageScrollRef = useRef<HTMLElement | null>(null)
+  const scrollAnimationFrameRef = useRef<number | null>(null)
   const anchorAppliedRef = useRef(false)
   const lastAnchoredMessageIdRef = useRef<string | null>(null)
   const recognitionRef = useRef<any>(null)
   const voiceBaseDraftRef = useRef('')
-  const maxComposerHeight = 260
+  const voiceFinalTranscriptRef = useRef('')
+  const keepVoiceListeningRef = useRef(false)
+  const voiceRestartTimerRef = useRef<number | null>(null)
+  const maxComposerHeight = 180
   const [isListening, setIsListening] = useState(false)
   const [isVoiceSupported, setIsVoiceSupported] = useState(false)
   const [readingMessageId, setReadingMessageId] = useState<string | null>(null)
+  const [isReadPaused, setIsReadPaused] = useState(false)
+  const [readElapsedMs, setReadElapsedMs] = useState(0)
+  const [readProgress, setReadProgress] = useState(0)
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null)
+  const readTickRef = useRef<number | null>(null)
+  const readStartedAtRef = useRef<number | null>(null)
+  const readBoundaryCharRef = useRef(0)
+  const readTextLengthRef = useRef(1)
+  const readWaveRef = useRef<HTMLDivElement | null>(null)
+  const estimatedReadDurationRef = useRef(1)
+  const [readWaveBarCount, setReadWaveBarCount] = useState(64)
+  const previousIsGeneratingRef = useRef(isGenerating)
+  const lastAutoReadMessageIdRef = useRef<string | null>(null)
+  const liveReadMessageIdRef = useRef<string | null>(null)
+  const liveReadLastLengthRef = useRef(0)
+  const liveReadPendingTextRef = useRef('')
+  const liveReadQueueRef = useRef<string[]>([])
+  const liveReadSpeakingRef = useRef(false)
+  const isGeneratingRef = useRef(isGenerating)
+  const lastScrollTopRef = useRef(0)
+  const hasScrolledUpRef = useRef(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [showImageModal, setShowImageModal] = useState(false)
@@ -1770,10 +1762,273 @@ function ChatWorkspace({
     reader.readAsDataURL(file)
   }
 
+  useEffect(() => {
+    if (!readingMessageId) return
+
+    const container = readWaveRef.current
+    if (!container) return
+
+    const updateBarCount = () => {
+      const width = container.clientWidth || 0
+      const target = Math.max(52, Math.floor(width / 6.2))
+      setReadWaveBarCount(target)
+    }
+
+    updateBarCount()
+
+    const observer = new ResizeObserver(() => updateBarCount())
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [readingMessageId])
+
+  const readWaveBars = useMemo(() => {
+    return Array.from({ length: readWaveBarCount }, (_, index) => {
+      const harmonicA = (Math.sin(index * 0.58) + 1) / 2
+      const harmonicB = (Math.sin(index * 0.19 + 0.9) + 1) / 2
+      const harmonicC = (Math.sin(index * 1.04 + 0.4) + 1) / 2
+      const energy = harmonicA * 0.52 + harmonicB * 0.28 + harmonicC * 0.2
+      return Math.round(4 + energy * 15)
+    })
+  }, [readWaveBarCount])
+
+  const readWaveDynamics = useMemo(() => {
+    return readWaveBars.map((_, index) => {
+      if (isReadPaused) {
+        return { scale: 0.62, trackOpacity: 0.26, fillOpacity: 0.9 }
+      }
+
+      const t = readElapsedMs / 145
+      const pulseA = (Math.sin(t + index * 0.82) + 1) / 2
+      const pulseB = (Math.sin(t * 0.57 + index * 0.27) + 1) / 2
+      const pulseC = (Math.sin(t * 0.34 + index * 0.11 + 2.2) + 1) / 2
+      const energy = 0.18 + pulseA * 0.58 + pulseB * 0.28 + pulseC * 0.2
+      const scale = Math.min(1.82, 0.52 + energy)
+      const trackOpacity = Math.min(0.42, 0.14 + energy * 0.2)
+      const fillOpacity = Math.min(1, 0.78 + energy * 0.22)
+      return { scale, trackOpacity, fillOpacity }
+    })
+  }, [isReadPaused, readElapsedMs, readWaveBars])
+
+  const readProgressPercent = Math.max(0, Math.min(100, readProgress * 100))
+
+  const formatReadElapsed = (elapsedMs: number) => {
+    const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000))
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+
+  const clearReadTick = () => {
+    if (readTickRef.current) {
+      window.clearInterval(readTickRef.current)
+      readTickRef.current = null
+    }
+  }
+
+  const resetReadPlayer = () => {
+    clearReadTick()
+    setReadingMessageId(null)
+    setIsReadPaused(false)
+    setReadElapsedMs(0)
+    setReadProgress(0)
+    readStartedAtRef.current = null
+    readBoundaryCharRef.current = 0
+    readTextLengthRef.current = 1
+    estimatedReadDurationRef.current = 1
+    synthRef.current = null
+  }
+
+  const resetLiveReadStreamState = () => {
+    liveReadMessageIdRef.current = null
+    liveReadLastLengthRef.current = 0
+    liveReadPendingTextRef.current = ''
+    liveReadQueueRef.current = []
+    liveReadSpeakingRef.current = false
+  }
+
+  const stopReadAloud = () => {
+    window.speechSynthesis.cancel()
+    resetLiveReadStreamState()
+    resetReadPlayer()
+  }
+
+  const queueLiveReadChunks = (incomingText: string, flushRemainder: boolean) => {
+    if (incomingText) {
+      liveReadPendingTextRef.current += incomingText
+    }
+
+    const chunks: string[] = []
+    let pending = liveReadPendingTextRef.current
+
+    while (true) {
+      const boundaryIndex = pending.search(/[.!?\n]/)
+      if (boundaryIndex === -1) break
+
+      const chunk = pending.slice(0, boundaryIndex + 1).trim()
+      if (chunk) {
+        chunks.push(chunk)
+      }
+      pending = pending.slice(boundaryIndex + 1)
+    }
+
+    if (flushRemainder) {
+      const remainder = pending.trim()
+      if (remainder) {
+        chunks.push(remainder)
+      }
+      pending = ''
+    }
+
+    liveReadPendingTextRef.current = pending
+    return chunks
+  }
+
+  const speakNextLiveChunk = () => {
+    if (liveReadSpeakingRef.current) return
+
+    const messageId = liveReadMessageIdRef.current
+    if (!messageId) return
+
+    const nextChunk = liveReadQueueRef.current.shift()
+    if (!nextChunk) {
+      if (!isGeneratingRef.current && !liveReadPendingTextRef.current.trim()) {
+        lastAutoReadMessageIdRef.current = messageId
+        resetLiveReadStreamState()
+        resetReadPlayer()
+      }
+      return
+    }
+
+    const utterance = new SpeechSynthesisUtterance(nextChunk)
+    utterance.lang = voiceLanguage
+    if (readVoiceUri && readVoiceUri !== 'default') {
+      const selectedVoice = window.speechSynthesis
+        .getVoices()
+        .find((voice) => voice.voiceURI === readVoiceUri)
+      if (selectedVoice) {
+        utterance.voice = selectedVoice
+        utterance.lang = selectedVoice.lang || voiceLanguage
+      }
+    }
+
+    liveReadSpeakingRef.current = true
+    setReadingMessageId(messageId)
+
+    utterance.onstart = () => {
+      if (!readStartedAtRef.current) {
+        readStartedAtRef.current = Date.now()
+      }
+      setIsReadPaused(false)
+      beginReadTick()
+    }
+
+    utterance.onend = () => {
+      liveReadSpeakingRef.current = false
+      synthRef.current = null
+      speakNextLiveChunk()
+    }
+
+    utterance.onerror = () => {
+      liveReadSpeakingRef.current = false
+      synthRef.current = null
+      speakNextLiveChunk()
+    }
+
+    synthRef.current = utterance
+    window.speechSynthesis.speak(utterance)
+  }
+
+  const beginReadTick = () => {
+    clearReadTick()
+    readTickRef.current = window.setInterval(() => {
+      const startAt = readStartedAtRef.current
+      if (!startAt) return
+      const elapsed = Date.now() - startAt
+      setReadElapsedMs(elapsed)
+      const boundaryProgress = Math.min(
+        0.99,
+        readBoundaryCharRef.current / Math.max(1, readTextLengthRef.current),
+      )
+      const fallbackProgress = Math.min(0.995, elapsed / estimatedReadDurationRef.current)
+      const blendedProgress =
+        boundaryProgress > 0
+          ? Math.max(boundaryProgress, Math.min(boundaryProgress + 0.06, fallbackProgress))
+          : fallbackProgress
+
+      setReadProgress((current) => Math.max(current, blendedProgress))
+    }, 160)
+  }
+
   const resizeComposerTextarea = (textarea: HTMLTextAreaElement) => {
     textarea.style.height = 'auto'
     const nextHeight = Math.min(textarea.scrollHeight, maxComposerHeight)
     textarea.style.height = `${Math.max(nextHeight, 42)}px`
+  }
+
+  const smoothScrollToBottom = (durationMs = 340) => {
+    const container = messageScrollRef.current
+    if (!container) return
+
+    if (scrollAnimationFrameRef.current) {
+      window.cancelAnimationFrame(scrollAnimationFrameRef.current)
+      scrollAnimationFrameRef.current = null
+    }
+
+    const startTop = container.scrollTop
+    const targetTop = Math.max(0, container.scrollHeight - container.clientHeight)
+    const distance = targetTop - startTop
+
+    if (distance <= 0) return
+
+    const startTime = performance.now()
+    const easeInOutCubic = (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+
+    const step = (now: number) => {
+      const elapsed = now - startTime
+      const progress = Math.min(1, elapsed / durationMs)
+      const eased = easeInOutCubic(progress)
+      container.scrollTop = startTop + distance * eased
+
+      if (progress < 1) {
+        scrollAnimationFrameRef.current = window.requestAnimationFrame(step)
+      } else {
+        scrollAnimationFrameRef.current = null
+      }
+    }
+
+    scrollAnimationFrameRef.current = window.requestAnimationFrame(step)
+  }
+
+  const updateScrollToLatestVisibility = () => {
+    const container = messageScrollRef.current
+    if (!container || visibleMessages.length === 0) {
+      setShowScrollToLatest(false)
+      return
+    }
+
+    const currentTop = container.scrollTop
+    const previousTop = lastScrollTopRef.current
+    const isScrollingUp = currentTop < previousTop
+    const isScrollingDown = currentTop > previousTop
+    const distanceFromBottom =
+      container.scrollHeight - (container.scrollTop + container.clientHeight)
+
+    if (distanceFromBottom <= 120) {
+      setShowScrollToLatest(false)
+      hasScrolledUpRef.current = false
+      lastScrollTopRef.current = currentTop
+      return
+    }
+
+    if (isScrollingUp) {
+      hasScrolledUpRef.current = true
+      setShowScrollToLatest(false)
+    } else if (isScrollingDown && hasScrolledUpRef.current) {
+      setShowScrollToLatest(true)
+    }
+
+    lastScrollTopRef.current = currentTop
   }
 
   useEffect(() => {
@@ -1818,11 +2073,43 @@ function ChatWorkspace({
     if (!assistantHasContent) return
 
     requestAnimationFrame(() => {
-      const container = messageScrollRef.current
-      if (!container) return
-      container.scrollTop = container.scrollHeight
+      smoothScrollToBottom(320)
     })
   }, [activeConversationId, generatingConversationId, isGenerating, visibleMessages])
+
+  useEffect(() => {
+    if (!activeConversationId) return
+    if (visibleMessages.length === 0) return
+    if (scrollAnchorMessageId) return
+    if (isGenerating && activeConversationId === generatingConversationId) return
+
+    requestAnimationFrame(() => {
+      smoothScrollToBottom(380)
+    })
+  }, [
+    activeConversationId,
+    generatingConversationId,
+    isGenerating,
+    scrollAnchorMessageId,
+    visibleMessages.length,
+  ])
+
+  useEffect(() => {
+    const container = messageScrollRef.current
+    if (!container) return
+
+    const onScroll = () => {
+      updateScrollToLatestVisibility()
+    }
+
+    lastScrollTopRef.current = container.scrollTop
+    hasScrolledUpRef.current = false
+    setShowScrollToLatest(false)
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      container.removeEventListener('scroll', onScroll)
+    }
+  }, [activeConversationId, isGenerating, visibleMessages.length])
 
   useEffect(() => {
     const SpeechRecognitionCtor =
@@ -1839,31 +2126,78 @@ function ChatWorkspace({
     recognition.continuous = true
     recognition.interimResults = true
 
+    const clearVoiceRestartTimer = () => {
+      if (voiceRestartTimerRef.current) {
+        window.clearTimeout(voiceRestartTimerRef.current)
+        voiceRestartTimerRef.current = null
+      }
+    }
+
+    const restartRecognition = () => {
+      if (!keepVoiceListeningRef.current) return
+      clearVoiceRestartTimer()
+      voiceRestartTimerRef.current = window.setTimeout(() => {
+        if (!keepVoiceListeningRef.current) return
+        try {
+          recognition.start()
+        } catch {
+          // Browser might still be transitioning states; we'll retry on next onend.
+        }
+      }, 140)
+    }
+
     recognition.onresult = (event: any) => {
-      let transcript = ''
-      for (let i = 0; i < event.results.length; i += 1) {
-        transcript += event.results[i][0].transcript
+      let interimTranscript = ''
+
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const chunk = event.results[i][0]?.transcript || ''
+        if (!chunk) continue
+
+        if (event.results[i].isFinal) {
+          voiceFinalTranscriptRef.current += chunk
+        } else {
+          interimTranscript += chunk
+        }
       }
 
       const base = voiceBaseDraftRef.current
       const spacer = base && !base.endsWith(' ') ? ' ' : ''
-      setDraft(`${base}${spacer}${transcript.trimStart()}`)
+      const combined = `${voiceFinalTranscriptRef.current}${interimTranscript}`.trimStart()
+      setDraft(`${base}${spacer}${combined}`)
     }
 
     recognition.onstart = () => {
       setIsListening(true)
     }
 
-    recognition.onerror = () => {
-      setIsListening(false)
+    recognition.onerror = (event: any) => {
+      if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+        keepVoiceListeningRef.current = false
+        setIsListening(false)
+        return
+      }
+
+      if (keepVoiceListeningRef.current) {
+        restartRecognition()
+      } else {
+        setIsListening(false)
+      }
     }
 
     recognition.onend = () => {
+      if (keepVoiceListeningRef.current) {
+        restartRecognition()
+        return
+      }
+
       setIsListening(false)
+      clearVoiceRestartTimer()
     }
 
     recognitionRef.current = recognition
     return () => {
+      keepVoiceListeningRef.current = false
+      clearVoiceRestartTimer()
       recognition.stop()
       recognitionRef.current = null
     }
@@ -1874,11 +2208,23 @@ function ChatWorkspace({
     if (!recognition) return
 
     if (isListening) {
+      keepVoiceListeningRef.current = false
+      if (voiceRestartTimerRef.current) {
+        window.clearTimeout(voiceRestartTimerRef.current)
+        voiceRestartTimerRef.current = null
+      }
       recognition.stop()
+      setIsListening(false)
       return
     }
 
+    keepVoiceListeningRef.current = true
     voiceBaseDraftRef.current = draft.trimEnd()
+    voiceFinalTranscriptRef.current = ''
+    if (voiceRestartTimerRef.current) {
+      window.clearTimeout(voiceRestartTimerRef.current)
+      voiceRestartTimerRef.current = null
+    }
     try {
       recognition.start()
     } catch {
@@ -1889,15 +2235,16 @@ function ChatWorkspace({
   const handleReadAloud = (messageId: string, content: string) => {
     // Stop any currently reading message
     if (readingMessageId === messageId) {
-      window.speechSynthesis.cancel()
-      setReadingMessageId(null)
+      stopReadAloud()
       return
     }
 
     // Stop previous reading
     if (readingMessageId) {
-      window.speechSynthesis.cancel()
+      stopReadAloud()
     }
+
+    resetLiveReadStreamState()
 
     // Remove markdown formatting for reading
     const plainText = content
@@ -1909,6 +2256,8 @@ function ChatWorkspace({
       .replace(/#{1,6}\s/g, '') // Headers
 
     const utterance = new SpeechSynthesisUtterance(plainText)
+    readTextLengthRef.current = Math.max(1, plainText.length)
+    readBoundaryCharRef.current = 0
     utterance.lang = voiceLanguage
     if (readVoiceUri && readVoiceUri !== 'default') {
       const selectedVoice = window.speechSynthesis
@@ -1919,13 +2268,143 @@ function ChatWorkspace({
         utterance.lang = selectedVoice.lang || voiceLanguage
       }
     }
-    utterance.onend = () => setReadingMessageId(null)
-    utterance.onerror = () => setReadingMessageId(null)
+    const wordCount = plainText.trim().split(/\s+/).filter(Boolean).length
+    estimatedReadDurationRef.current = Math.max(
+      3800,
+      Math.round(Math.max(wordCount / 2, plainText.length / 10.8) * 1000),
+    )
+
+    utterance.onstart = () => {
+      readStartedAtRef.current = Date.now()
+      setReadElapsedMs(0)
+      setReadProgress(0)
+      setIsReadPaused(false)
+      beginReadTick()
+    }
+
+    utterance.onboundary = (event: SpeechSynthesisEvent) => {
+      if (!plainText.length) return
+      readBoundaryCharRef.current = event.charIndex
+      const boundaryProgress = Math.min(1, event.charIndex / plainText.length)
+      setReadProgress((current) => Math.max(current, boundaryProgress))
+    }
+
+    utterance.onend = () => resetReadPlayer()
+    utterance.onerror = () => resetReadPlayer()
 
     setReadingMessageId(messageId)
     synthRef.current = utterance
     window.speechSynthesis.speak(utterance)
   }
+
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating
+    const justFinishedGenerating = previousIsGeneratingRef.current && !isGenerating
+    previousIsGeneratingRef.current = isGenerating
+
+    if (!readAfterSend) {
+      if (liveReadMessageIdRef.current) {
+        stopReadAloud()
+      }
+      return
+    }
+
+    const latestAssistantMessage = [...visibleMessages]
+      .reverse()
+      .find((message) => message.role === 'assistant')
+
+    if (!latestAssistantMessage) return
+
+    const isLiveReadingActive = liveReadMessageIdRef.current !== null
+    if (!isLiveReadingActive) {
+      // Only start auto-reading while current response is actively streaming.
+      if (!isGenerating) return
+      // While model is still "thinking" current assistant content is empty; do not read previous reply.
+      if (latestAssistantMessage.content.trim().length === 0) return
+    }
+
+    // Avoid replaying the same message after stream-end refreshes.
+    if (
+      !isGenerating &&
+      liveReadMessageIdRef.current === null &&
+      lastAutoReadMessageIdRef.current === latestAssistantMessage.id
+    ) {
+      return
+    }
+
+    if (liveReadMessageIdRef.current !== latestAssistantMessage.id) {
+      if (liveReadMessageIdRef.current === null) {
+        if (latestAssistantMessage.content.trim().length === 0) return
+        liveReadMessageIdRef.current = latestAssistantMessage.id
+        liveReadLastLengthRef.current = 0
+        liveReadPendingTextRef.current = ''
+        liveReadQueueRef.current = []
+        liveReadSpeakingRef.current = false
+        readStartedAtRef.current = null
+        setReadElapsedMs(0)
+        setReadProgress(0)
+      } else {
+        // During active streaming, backend refresh can swap temp assistant id to persisted id.
+        // Keep progress and continue; never rebind after stream has already finished.
+        if (!isGenerating) {
+          return
+        }
+        if (latestAssistantMessage.content.length < liveReadLastLengthRef.current) {
+          return
+        }
+        liveReadMessageIdRef.current = latestAssistantMessage.id
+      }
+    }
+
+    const previousLength = liveReadLastLengthRef.current
+    const currentContent = latestAssistantMessage.content
+    if (currentContent.length > previousLength) {
+      const incomingText = currentContent.slice(previousLength)
+      liveReadLastLengthRef.current = currentContent.length
+      const chunks = queueLiveReadChunks(incomingText, false)
+      if (chunks.length > 0) {
+        liveReadQueueRef.current.push(...chunks)
+      }
+    }
+
+    if (justFinishedGenerating) {
+      const finalChunks = queueLiveReadChunks('', true)
+      if (finalChunks.length > 0) {
+        liveReadQueueRef.current.push(...finalChunks)
+      }
+    }
+
+    speakNextLiveChunk()
+  }, [isGenerating, readAfterSend, visibleMessages])
+
+  const toggleReadPlayback = () => {
+    if (!readingMessageId) return
+
+    if (isReadPaused) {
+      window.speechSynthesis.resume()
+      readStartedAtRef.current = Date.now() - readElapsedMs
+      setIsReadPaused(false)
+      beginReadTick()
+      return
+    }
+
+    window.speechSynthesis.pause()
+    setIsReadPaused(true)
+    clearReadTick()
+  }
+
+  useEffect(() => {
+    return () => {
+      if (scrollAnimationFrameRef.current) {
+        window.cancelAnimationFrame(scrollAnimationFrameRef.current)
+        scrollAnimationFrameRef.current = null
+      }
+      clearReadTick()
+      if (synthRef.current) {
+        window.speechSynthesis.cancel()
+      }
+    }
+  }, [])
 
   const handleCopyMessage = (messageId: string, content: string) => {
     void navigator.clipboard.writeText(content)
@@ -2010,6 +2489,41 @@ function ChatWorkspace({
     }
   }
 
+  const groupedConversations = useMemo(() => {
+    const now = new Date()
+    const buckets: Record<ConversationGroupKey, Conversation[]> = {
+      today: [],
+      yesterday: [],
+      previous7: [],
+      older: [],
+    }
+
+    conversations.forEach((conversation) => {
+      const groupKey = getConversationGroupKey(conversation.created_at, now)
+      buckets[groupKey].push(conversation)
+    })
+
+    const order: ConversationGroupKey[] = ['today', 'yesterday', 'previous7', 'older']
+    return order
+      .map((key) => ({
+        key,
+        label: CONVERSATION_GROUP_LABELS[key],
+        items: buckets[key],
+      }))
+      .filter((group) => group.items.length > 0)
+  }, [conversations])
+
+  const [collapsedGroups, setCollapsedGroups] = useState<
+    Partial<Record<ConversationGroupKey, boolean>>
+  >({})
+
+  const toggleGroupCollapsed = (groupKey: ConversationGroupKey) => {
+    setCollapsedGroups((prev) => ({
+      ...prev,
+      [groupKey]: !prev[groupKey],
+    }))
+  }
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${isGenerating ? 'streaming' : ''}`}>
@@ -2030,43 +2544,70 @@ function ChatWorkspace({
 
         <div className="conversations-container">
           <div className="conversation-list">
-            {conversations.map((conv) => {
-              const isBackgroundGenerating = isGenerating && generatingConversationId === conv.id && activeConversationId !== conv.id
-              return (
-                <div
-                  key={conv.id}
-                  className={`conversation-row ${
-                    activeConversationId === conv.id ? 'active' : ''
-                  } ${isBackgroundGenerating ? 'generating-background' : ''}`}
+            {groupedConversations.map((group) => (
+              <section key={group.key} className="conversation-section">
+                <button
+                  type="button"
+                  className="conversation-section-title"
+                  onClick={() => toggleGroupCollapsed(group.key)}
+                  aria-expanded={!collapsedGroups[group.key]}
+                  aria-label={`${collapsedGroups[group.key] ? 'Expand' : 'Collapse'} ${group.label}`}
                 >
-                  <button
-                    className="conversation-item"
-                    onClick={() => onSelectConversation(conv.id)}
-                  >
-                    {conv.title}
-                    {isBackgroundGenerating && (
-                      <span className="generating-indicator" title="Generating response in background" />
-                    )}
-                  </button>
-                  <div className="conversation-actions">
-                    <button
-                      className="conversation-share"
-                      onClick={() => void onShareConversation(conv.id)}
-                      aria-label="Share conversation"
+                  <span>{group.label}</span>
+                  <ChevronDown
+                    size={14}
+                    aria-hidden="true"
+                    className={collapsedGroups[group.key] ? 'collapsed' : ''}
+                  />
+                </button>
+                {!collapsedGroups[group.key] && group.items.map((conv) => {
+                  const isGeneratingConversation =
+                    isGenerating && generatingConversationId === conv.id
+                  return (
+                    <div
+                      key={conv.id}
+                      className={`conversation-row ${
+                        activeConversationId === conv.id ? 'active' : ''
+                      } ${isGeneratingConversation ? 'generating-background generating' : ''}`}
                     >
-                      <Share2 size={14} />
-                    </button>
-                    <button
-                      className="conversation-delete"
-                      onClick={() => onDeleteConversationRequest(conv.id)}
-                      aria-label="Delete conversation"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+                      <button
+                        className="conversation-item"
+                        onClick={() => onSelectConversation(conv.id)}
+                      >
+                        <span className="conversation-item-main">
+                          <span className="conversation-item-icon" aria-hidden="true">
+                            <img src="/llama_logo_transparent.png" alt="" />
+                          </span>
+                          <span className="conversation-item-title">{conv.title}</span>
+                        </span>
+                        {isGeneratingConversation && (
+                          <span
+                            className="generating-indicator"
+                            title="Generating response"
+                          />
+                        )}
+                      </button>
+                      <div className="conversation-actions">
+                        <button
+                          className="conversation-share"
+                          onClick={() => void onShareConversation(conv.id)}
+                          aria-label="Share conversation"
+                        >
+                          <Share2 size={14} />
+                        </button>
+                        <button
+                          className="conversation-delete"
+                          onClick={() => onDeleteConversationRequest(conv.id)}
+                          aria-label="Delete conversation"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </section>
+            ))}
           </div>
         </div>
 
@@ -2099,12 +2640,81 @@ function ChatWorkspace({
           </div>
         </header>
 
+        {readingMessageId && (
+          <div className="read-aloud-player" role="status" aria-live="polite">
+            <button
+              type="button"
+              className="read-aloud-control read-aloud-toggle"
+              onClick={toggleReadPlayback}
+              aria-label={isReadPaused ? 'Resume read aloud' : 'Pause read aloud'}
+              title={isReadPaused ? 'Resume' : 'Pause'}
+            >
+              {isReadPaused ? <Play size={18} /> : <Pause size={18} />}
+            </button>
+            <span className="read-aloud-time">{formatReadElapsed(readElapsedMs)}</span>
+            <span className="read-aloud-playhead" aria-hidden="true" />
+            <div
+              ref={readWaveRef}
+              className={`read-aloud-wave ${isReadPaused ? 'paused' : ''}`}
+              aria-hidden="true"
+            >
+              <div className="read-aloud-wave-track">
+                {readWaveBars.map((height, index) => {
+                  const dynamic = readWaveDynamics[index]
+                  return (
+                    <span
+                      key={`track-${height}-${index}`}
+                      className="read-aloud-wave-bar read-aloud-wave-bar-track"
+                      style={{
+                        height: `${height}px`,
+                        transform: `scaleY(${dynamic.scale})`,
+                        opacity: dynamic.trackOpacity,
+                      }}
+                    />
+                  )
+                })}
+              </div>
+              <div className="read-aloud-wave-fill" style={{ width: `${readProgressPercent}%` }}>
+                {readWaveBars.map((height, index) => {
+                  const dynamic = readWaveDynamics[index]
+                  return (
+                    <span
+                      key={`fill-${height}-${index}`}
+                      className="read-aloud-wave-bar read-aloud-wave-bar-fill"
+                      style={{
+                        height: `${height}px`,
+                        transform: `scaleY(${dynamic.scale})`,
+                        opacity: dynamic.fillOpacity,
+                      }}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="read-aloud-control read-aloud-close"
+              onClick={stopReadAloud}
+              aria-label="Close read aloud player"
+              title="Stop"
+            >
+              <X size={22} />
+            </button>
+          </div>
+        )}
+
         <main ref={messageScrollRef} className="message-scroll">
           {visibleMessages.length === 0 ? (
             <section className="empty-state">
-              <h3>How can I help today?</h3>
-              <p>Pick a suggestion or type your own message.</p>
-              <p className="purpose-label">Purpose: {PURPOSE_LABELS[promptPurpose]}</p>
+              <img
+                className="chat-empty-logo"
+                src="/llama_logo_transparent.png"
+                alt="Llama AI"
+              />
+              <h3>
+                Welcome to <span>Llama AI</span>
+              </h3>
+              <p>How can I assist you today?</p>
               <div className="suggestion-grid">
                 {promptCards.map((prompt) => (
                   <button
@@ -2115,7 +2725,8 @@ function ChatWorkspace({
                       clearSelectedImage()
                     }}
                   >
-                    {prompt}
+                    <strong>{prompt}</strong>
+                    <span>{PROMPT_HELP_TEXT[prompt] || 'Tap to start with this prompt.'}</span>
                   </button>
                 ))}
               </div>
@@ -2168,6 +2779,59 @@ function ChatWorkspace({
                       message.role === 'user' ? 'user-row' : 'assistant-row'
                     }`}
                   >
+                    {message.role === 'assistant' ? (
+                      <div className="assistant-bubble-wrap">
+                        <img
+                          className="assistant-message-logo"
+                          src="/llama_logo_transparent.png"
+                          alt="Llama AI"
+                        />
+                        <div className="bubble assistant">
+                          {isPendingAssistant ? (
+                            <div className="thinking-inline">
+                              <span className="thinking-dot"></span>
+                              <span className="thinking-dot"></span>
+                              <span className="thinking-dot"></span>
+                              <p>{isAnalyzingImage ? 'Analyzing image...' : 'Thinking...'}</p>
+                            </div>
+                          ) : (
+                            <>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  code: ({ node, className, children, ...props }) => {
+                                    const code = String(children)
+                                    const language = className?.replace('language-', '')
+                                    const meta =
+                                      ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                                        ?.data?.meta ||
+                                        (node as { meta?: string } | undefined)?.meta ||
+                                        '')
+                                    const isBlock = Boolean(language) || code.includes('\n')
+
+                                    if (isBlock) {
+                                      return (
+                                        <CopyableCodeBlock language={language} meta={meta}>
+                                          {code}
+                                        </CopyableCodeBlock>
+                                      )
+                                    }
+
+                                    return (
+                                      <code className={className} {...props}>
+                                        {children}
+                                      </code>
+                                    )
+                                  },
+                                }}
+                              >
+                                {cleanAssistantOutput(message.content)}
+                              </ReactMarkdown>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
                     <div
                       className={`bubble ${message.role} ${
                         message.role === 'user' && hasUserImage ? 'with-image' : ''
@@ -2188,57 +2852,15 @@ function ChatWorkspace({
                           {userPromptText && <p className="message-image-caption">{userPromptText}</p>}
                         </div>
                       )}
-                      {isPendingAssistant ? (
-                        <div className="thinking-inline">
-                          <span className="thinking-dot"></span>
-                          <span className="thinking-dot"></span>
-                          <span className="thinking-dot"></span>
-                          <p>{isAnalyzingImage ? 'Analyzing image...' : 'Thinking...'}</p>
-                        </div>
-                      ) : message.role === 'assistant' ? (
-                        <>
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              code: ({ node, className, children, ...props }) => {
-                                const code = String(children)
-                                const language = className?.replace('language-', '')
-                                const meta =
-                                  ((node as { data?: { meta?: string }; meta?: string } | undefined)
-                                    ?.data?.meta ||
-                                    (node as { meta?: string } | undefined)?.meta ||
-                                    '')
-                                const isBlock = Boolean(language) || code.includes('\n')
-
-                                if (isBlock) {
-                                  return (
-                                    <CopyableCodeBlock language={language} meta={meta}>
-                                      {code}
-                                    </CopyableCodeBlock>
-                                  )
-                                }
-
-                                return (
-                                  <code className={className} {...props}>
-                                    {children}
-                                  </code>
-                                )
-                              },
-                            }}
-                          >
-                            {cleanAssistantOutput(message.content)}
-                          </ReactMarkdown>
-                        </>
-                      ) : (
-                        !hasUserImage && (
-                          <p>
-                            {message.content
-                              .replace(/\[Image:\s*[^\]]+\]/g, '')
-                              .trim() || (message.content.includes('[Image:') ? 'Image sent' : message.content)}
-                          </p>
-                        )
+                      {!hasUserImage && (
+                        <p>
+                          {message.content
+                            .replace(/\[Image:\s*[^\]]+\]/g, '')
+                            .trim() || (message.content.includes('[Image:') ? 'Image sent' : message.content)}
+                        </p>
                       )}
                     </div>
+                    )}
                     {!isPendingAssistant && message.role === 'assistant' && (
                       <div className="message-actions message-actions-outside">
                         <button
@@ -2300,6 +2922,20 @@ function ChatWorkspace({
               })()}
             </div>
           )}
+          {showScrollToLatest && (
+            <button
+              type="button"
+              className="scroll-to-latest-button"
+              onClick={() => {
+                setShowScrollToLatest(false)
+                smoothScrollToBottom(420)
+              }}
+              aria-label="Scroll to latest response"
+              title="Scroll to latest"
+            >
+              <ArrowDown size={18} />
+            </button>
+          )}
           <div ref={endRef} />
         </main>
 
@@ -2312,9 +2948,10 @@ function ChatWorkspace({
                 value={selectedModel}
                 options={COMPOSER_MODEL_OPTIONS.map((model) => ({
                   value: model,
-                  label: MODEL_LABELS[model],
+                  label: MODEL_ENGINE_LABELS[model],
                 }))}
                 onChange={setSelectedModel}
+                triggerClassName="composer-select model-select-trigger composer-model-trigger"
               />
             </div>
           )}
@@ -2360,34 +2997,49 @@ function ChatWorkspace({
             />
             <button
               type="button"
-              className="image-upload-trigger"
+              className="composer-action-button image-upload-trigger"
               onClick={() => fileInputRef.current?.click()}
               disabled={isGenerating}
               title={selectedImageFile ? 'Change image' : 'Upload image'}
             >
               <ImagePlus size={20} />
             </button>
-            <textarea
-              ref={composerTextareaRef}
-              value={draft}
-              onChange={(event) => {
-                const target = event.currentTarget
-                resizeComposerTextarea(target)
-                setDraft(event.target.value)
-              }}
-              placeholder="Type your message..."
-              rows={1}
-              onKeyDown={(event) => {
-                const shouldSend =
-                  event.key === 'Enter' &&
-                  (enterToSend ? !event.shiftKey : (event.ctrlKey || event.metaKey))
+            <div className="composer-input-shell">
+              <textarea
+                ref={composerTextareaRef}
+                value={draft}
+                onChange={(event) => {
+                  const target = event.currentTarget
+                  resizeComposerTextarea(target)
+                  setDraft(event.target.value)
+                }}
+                placeholder="Type your message..."
+                rows={1}
+                onKeyDown={(event) => {
+                  const shouldSend =
+                    event.key === 'Enter' &&
+                    (enterToSend ? !event.shiftKey : (event.ctrlKey || event.metaKey))
 
-                if (shouldSend) {
-                  event.preventDefault()
-                  handleComposerSendOrStop()
-                }
-              }}
-            />
+                  if (shouldSend) {
+                    event.preventDefault()
+                    handleComposerSendOrStop()
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className={`composer-inline-mic composer-action-button voice-button ${
+                  isListening ? 'listening' : ''
+                }`}
+                onClick={toggleVoiceTyping}
+                disabled={!isVoiceSupported}
+                aria-label={isListening ? 'Stop voice typing' : 'Start voice typing'}
+                title={isVoiceSupported ? 'Voice typing' : 'Voice typing unavailable'}
+              >
+                {isListening && <span className="action-ring-loader" aria-hidden="true" />}
+                <Mic size={22} />
+              </button>
+            </div>
             {showImageModal && previewImageUrl && (
               <div className="image-modal-overlay" onClick={() => setShowImageModal(false)}>
                 <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
@@ -2406,20 +3058,6 @@ function ChatWorkspace({
             <div className="composer-actions">
               <button
                 type="button"
-                className={`composer-action-button voice-button ${
-                  isListening ? 'listening' : ''
-                }`}
-                onClick={toggleVoiceTyping}
-                disabled={!isVoiceSupported}
-                aria-label={isListening ? 'Stop voice typing' : 'Start voice typing'}
-                title={isVoiceSupported ? 'Voice typing' : 'Voice typing unavailable'}
-              >
-                {isListening && <span className="action-ring-loader" aria-hidden="true" />}
-                <Mic size={22} />
-              </button>
-
-              <button
-                type="button"
                 className={`composer-action-button send-button ${
                   isStopState ? 'stop' : 'send'
                 }`}
@@ -2429,7 +3067,6 @@ function ChatWorkspace({
                 disabled={isGenerating && activeConversationId !== generatingConversationId}
                 aria-label={isStopState ? 'Stop generation' : 'Send message'}
               >
-                {isStopState && <span className="action-ring-loader" aria-hidden="true" />}
                 {isStopState ? (
                   <Square size={18} />
                 ) : (
@@ -2471,12 +3108,14 @@ type DashboardProps = {
   joinedAt: string
   totalConversations: number
   totalMessages: number
+  totalResponseTokens: number
   theme: ThemeMode
   setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>
   displayName: string
   responseStyle: ResponseStyle
   promptPurpose: PromptPurpose
   enterToSend: boolean
+  readAfterSend: boolean
   suggestionCount: 4 | 6
   voiceLanguage: VoiceLanguage
   readVoiceUri: string
@@ -2488,12 +3127,14 @@ type DashboardProps = {
   ) => void
   onSaveExperienceSettings: (
     enterToSend: boolean,
+    readAfterSend: boolean,
     suggestionCount: 4 | 6,
     voiceLanguage: VoiceLanguage,
     readVoiceUri: string,
     confirmClearChats: boolean,
   ) => void
   onClearChats: () => Promise<void>
+  onExportChats: () => void
   onLogout: () => Promise<void>
 }
 
@@ -2503,12 +3144,14 @@ function Dashboard({
   joinedAt,
   totalConversations,
   totalMessages,
+  totalResponseTokens,
   theme,
   setTheme,
   displayName,
   responseStyle,
   promptPurpose,
   enterToSend,
+  readAfterSend,
   suggestionCount,
   voiceLanguage,
   readVoiceUri,
@@ -2516,6 +3159,7 @@ function Dashboard({
   onSavePersonalization,
   onSaveExperienceSettings,
   onClearChats,
+  onExportChats,
   onLogout,
 }: DashboardProps) {
   const navigate = useNavigate()
@@ -2535,6 +3179,15 @@ function Dashboard({
   const [confirmClearDraft, setConfirmClearDraft] = useState(confirmClearChats)
   const [personalizationSaveState, setPersonalizationSaveState] = useState<'idle' | 'saved'>('idle')
   const [experienceSaveState, setExperienceSaveState] = useState<'idle' | 'saved'>('idle')
+  const [dashboardView, setDashboardView] = useState<
+    'main' | 'personalization' | 'chat' | 'ai' | 'voice' | 'appearance' | 'privacy'
+  >('main')
+  const [themeDraft, setThemeDraft] = useState<ThemeMode>(theme)
+  const [readAfterSendDraft, setReadAfterSendDraft] = useState(readAfterSend)
+  const [chatExportEnabled, setChatExportEnabled] = useState(false)
+  const [dataAnalyticsEnabled, setDataAnalyticsEnabled] = useState(false)
+  const [chatExportDraft, setChatExportDraft] = useState(false)
+  const [dataAnalyticsDraft, setDataAnalyticsDraft] = useState(false)
 
   useEffect(() => {
     setNameDraft(displayName)
@@ -2545,6 +3198,8 @@ function Dashboard({
     setVoiceLanguageDraft(voiceLanguage)
     setReadVoiceUriDraft(readVoiceUri)
     setConfirmClearDraft(confirmClearChats)
+    setReadAfterSendDraft(readAfterSend)
+    setThemeDraft(theme)
   }, [
     displayName,
     responseStyle,
@@ -2554,7 +3209,36 @@ function Dashboard({
     voiceLanguage,
     readVoiceUri,
     confirmClearChats,
+    readAfterSend,
+    theme,
   ])
+
+  useEffect(() => {
+    if (dashboardView === 'appearance') {
+      setThemeDraft(theme)
+    }
+  }, [dashboardView, theme])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const storedChatExport = window.localStorage.getItem(`chat-export-enabled:${userId}`)
+    const storedDataAnalytics = window.localStorage.getItem(`data-analytics-enabled:${userId}`)
+    const nextChatExportEnabled = storedChatExport === 'true'
+    const nextDataAnalyticsEnabled = storedDataAnalytics === 'true'
+
+    setChatExportEnabled(nextChatExportEnabled)
+    setDataAnalyticsEnabled(nextDataAnalyticsEnabled)
+    setChatExportDraft(nextChatExportEnabled)
+    setDataAnalyticsDraft(nextDataAnalyticsEnabled)
+  }, [userId])
+
+  useEffect(() => {
+    if (dashboardView === 'privacy') {
+      setChatExportDraft(chatExportEnabled)
+      setDataAnalyticsDraft(dataAnalyticsEnabled)
+    }
+  }, [dashboardView, chatExportEnabled, dataAnalyticsEnabled])
 
   useEffect(() => {
     setPreviewingVoiceUri(null)
@@ -2564,6 +3248,8 @@ function Dashboard({
     }
 
     const synth = window.speechSynthesis
+    let pollTimer: number | null = null
+    let pollAttempts = 0
     const updateVoiceOptions = () => {
       const voices = synth.getVoices()
       const filtered = voices.filter((voice) =>
@@ -2594,11 +3280,32 @@ function Dashboard({
       ) {
         setReadVoiceUriDraft('default')
       }
+
+      if (sourceVoices.length > 0 && pollTimer) {
+        window.clearInterval(pollTimer)
+        pollTimer = null
+      }
     }
 
     updateVoiceOptions()
     synth.addEventListener('voiceschanged', updateVoiceOptions)
-    return () => synth.removeEventListener('voiceschanged', updateVoiceOptions)
+
+    // Some mobile browsers load voices late and do not reliably fire voiceschanged.
+    pollTimer = window.setInterval(() => {
+      pollAttempts += 1
+      updateVoiceOptions()
+      if (pollAttempts >= 20 && pollTimer) {
+        window.clearInterval(pollTimer)
+        pollTimer = null
+      }
+    }, 400)
+
+    return () => {
+      synth.removeEventListener('voiceschanged', updateVoiceOptions)
+      if (pollTimer) {
+        window.clearInterval(pollTimer)
+      }
+    }
   }, [voiceLanguageDraft, readVoiceUriDraft])
 
   useEffect(() => {
@@ -2671,219 +3378,458 @@ function Dashboard({
     .map((part) => part[0]?.toUpperCase())
     .join('')
 
+  const saveExperienceDraft = () => {
+    onSaveExperienceSettings(
+      enterToSendDraft,
+      readAfterSendDraft,
+      suggestionCountDraft,
+      voiceLanguageDraft,
+      readVoiceUriDraft,
+      confirmClearDraft,
+    )
+    flashSavedState(setExperienceSaveState)
+  }
+
+  const savePersonalizationDraft = () => {
+    onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft)
+    flashSavedState(setPersonalizationSaveState)
+  }
+
+  const savePrivacyDraft = () => {
+    setChatExportEnabled(chatExportDraft)
+    setDataAnalyticsEnabled(dataAnalyticsDraft)
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(`chat-export-enabled:${userId}`, String(chatExportDraft))
+      window.localStorage.setItem(`data-analytics-enabled:${userId}`, String(dataAnalyticsDraft))
+    }
+
+    setDashboardView('main')
+  }
+
+  const dashboardTitleMap: Record<typeof dashboardView, string> = {
+    main: 'User Dashboard',
+    personalization: 'Personalization',
+    chat: 'Chat Experience',
+    ai: 'AI Behavior',
+    voice: 'Voice & Audio',
+    appearance: 'Appearance',
+    privacy: 'Data & Privacy',
+  }
+
+  const purposeOptions = Object.keys(PURPOSE_LABELS) as PromptPurpose[]
+
+  const quickRows = [
+    {
+      icon: <User size={16} />,
+      label: 'Display Name',
+      value: nameDraft || 'Set your name',
+    },
+    {
+      icon: theme === 'light' ? <Sun size={16} /> : <Moon size={16} />,
+      label: 'Theme',
+      value: theme === 'light' ? 'Light' : 'Dark',
+    },
+    {
+      icon: <Sparkles size={16} />,
+      label: 'Purpose',
+      value: PURPOSE_LABELS[purposeDraft],
+    },
+    {
+      icon: <Keyboard size={16} />,
+      label: 'Enter Behavior',
+      value: enterToSendDraft ? 'Enter sends message' : 'Enter adds new line',
+    },
+  ]
+
+  const dashboardOptions = [
+    {
+      key: 'personalization' as const,
+      icon: <User size={18} />,
+      title: 'Personalization',
+      desc: 'Change your display name, set purposes',
+    },
+    {
+      key: 'chat' as const,
+      icon: <MessageSquarePlus size={18} />,
+      title: 'Chat Experience',
+      desc: 'Adjust input methods, key behavior, language',
+    },
+    {
+      key: 'ai' as const,
+      icon: <Cpu size={18} />,
+      title: 'AI Behavior',
+      desc: 'Configure response style, cards, memory',
+    },
+    {
+      key: 'voice' as const,
+      icon: <Mic size={18} />,
+      title: 'Voice & Audio',
+      desc: 'Manage voice input, output, and preferences',
+    },
+    {
+      key: 'appearance' as const,
+      icon: <Palette size={18} />,
+      title: `Theme: ${theme === 'light' ? 'Light' : 'Dark'}`,
+      desc: 'Adaptive colors and display preferences',
+    },
+    {
+      key: 'privacy' as const,
+      icon: <Shield size={18} />,
+      title: 'Data & Privacy',
+      desc: 'Chat export, analytics, and safety controls',
+    },
+  ]
+
+  const SectionHeader = ({ title }: { title: string }) => (
+    <div className="dashv2-head">
+      <button
+        type="button"
+        className="dashv2-round"
+        onClick={() => (dashboardView === 'main' ? navigate('/chat') : setDashboardView('main'))}
+        aria-label={dashboardView === 'main' ? 'Back to chat' : 'Back to dashboard'}
+      >
+        <ArrowLeft size={18} />
+      </button>
+      <h2>{title}</h2>
+    </div>
+  )
+
   return (
     <div className="dashboard-screen">
-      <div className="dashboard-card">
-        <div className="dashboard-head">
-          <div className="dashboard-head-copy">
-            <p className="dashboard-eyebrow">Workspace settings</p>
-            <h2>User Dashboard</h2>
-            <p className="muted-text">Tune your profile, chat experience, and app behavior.</p>
-          </div>
-          <button
-            className="icon-button"
-            onClick={() => navigate('/chat')}
-            aria-label="Close dashboard"
-          >
-            <X size={16} />
-          </button>
-        </div>
+      <div className="dashboard-card dashboard-card-v2">
+        <SectionHeader title={dashboardTitleMap[dashboardView]} />
 
-        <section className="profile-panel">
-          <div className="avatar-pill">{initials}</div>
-          <div className="profile-copy">
+        <section className="dashv2-profile">
+          <div className="dashv2-avatar">{initials || 'U'}</div>
+          <div className="dashv2-profile-copy">
             <h3>{nameDraft || 'User'}</h3>
-            <p className="muted-text">{email}</p>
-            <p className="meta-line">ID: {userId.slice(0, 8)}... · Joined: {joinedAt}</p>
-            <div className="dashboard-badges">
-              <span className="dashboard-badge">Theme: {theme}</span>
-              <span className="dashboard-badge">Purpose: {PURPOSE_LABELS[promptPurpose]}</span>
-              <span className="dashboard-badge">
-                {enterToSend ? 'Enter sends' : 'Enter adds newline'}
-              </span>
-            </div>
+            <p>{email}</p>
+            <small>ID: {userId.slice(0, 8)}... · Joined: {joinedAt}</small>
           </div>
         </section>
 
-        <section className="usage-grid">
-          <article className="usage-card">
-            <p className="usage-label">Conversations</p>
-            <p className="usage-value">{totalConversations}</p>
-          </article>
-          <article className="usage-card">
-            <p className="usage-label">Messages</p>
-            <p className="usage-value">{totalMessages}</p>
-          </article>
-          <article className="usage-card">
-            <p className="usage-label">Theme</p>
-            <p className="usage-value usage-text">{theme}</p>
-          </article>
-        </section>
-
-        <section className="dashboard-layout">
-          <section className="personalize-panel">
-            <div className="panel-head">
-              <div>
-                <p className="panel-kicker">Profile</p>
-                <h3>Personalization</h3>
+        {dashboardView === 'main' && (
+          <>
+            <section className="dashv2-quick-card">
+              {quickRows.map((row) => (
+                <div key={row.label} className="dashv2-quick-row">
+                  <span className="dashv2-quick-label">{row.icon} {row.label}</span>
+                  <span className="dashv2-quick-value">{row.value}</span>
+                </div>
+              ))}
+              <div className="dashv2-quick-row">
+                <span className="dashv2-quick-label"><MessageSquarePlus size={16} /> Conversations</span>
+                <span className="dashv2-quick-value">{totalConversations}</span>
               </div>
+              <div className="dashv2-quick-row">
+                <span className="dashv2-quick-label"><Cpu size={16} /> Messages</span>
+                <span className="dashv2-quick-value">{totalMessages}</span>
+              </div>
+              <div className="dashv2-quick-row">
+                <span className="dashv2-quick-label"><Cpu size={16} /> Tokens Usage</span>
+                <span className="dashv2-quick-value">{totalResponseTokens.toLocaleString()}</span>
+              </div>
+            </section>
+
+            <section className="dashv2-option-stack">
+              {dashboardOptions.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className="dashv2-option"
+                  onClick={() => setDashboardView(option.key)}
+                >
+                  <span className="dashv2-option-icon">{option.icon}</span>
+                  <span className="dashv2-option-copy">
+                    <strong>{option.title}</strong>
+                    <small>{option.desc}</small>
+                  </span>
+                  <ChevronRight size={18} />
+                </button>
+              ))}
+            </section>
+
+            <section className="dashv2-footer-actions">
+              <button className="dashv2-flat-action" onClick={() => void onLogout()}>
+                <LogOut size={16} />
+                Logout
+              </button>
+              <button className="dashv2-flat-action danger" onClick={() => void onClearChats()}>
+                <X size={16} />
+                Clear all chats
+              </button>
+            </section>
+          </>
+        )}
+
+        {dashboardView === 'personalization' && (
+          <section className="dashv2-section-card">
+            <label className="dashv2-field" htmlFor="display-name-v2">
+              <span>Display Name</span>
+              <input
+                id="display-name-v2"
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                placeholder="Your display name"
+              />
+            </label>
+
+            <div className="dashv2-field">
+              <span>Purpose</span>
+              <div className="dashv2-chip-grid">
+                {purposeOptions.map((purpose) => (
+                  <button
+                    key={purpose}
+                    type="button"
+                    className={`dashv2-chip ${purposeDraft === purpose ? 'active' : ''}`}
+                    onClick={() => setPurposeDraft(purpose)}
+                  >
+                    {PURPOSE_LABELS[purpose]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button type="button" className="dashv2-save" onClick={savePersonalizationDraft}>
+              {personalizationSaveState === 'saved' ? 'Saved' : 'Save'}
+            </button>
+          </section>
+        )}
+
+        {dashboardView === 'chat' && (
+          <section className="dashv2-section-card">
+            <label className="dashv2-field">
+              <span>Enter Key Behavior</span>
               <button
                 type="button"
-                className="secondary-button dashboard-save-button"
-                onClick={() => {
-                  onSavePersonalization(nameDraft.trim(), styleDraft, purposeDraft)
-                  flashSavedState(setPersonalizationSaveState)
-                }}
+                className="dashv2-inline-button"
+                onClick={() => setEnterToSendDraft((prev) => !prev)}
               >
-                {personalizationSaveState === 'saved' ? 'Saved' : 'Save preferences'}
+                {enterToSendDraft ? 'Enter sends message' : 'Enter adds new line'}
+                <ChevronRight size={16} />
               </button>
-            </div>
-            <div className="personalize-grid">
-              <label className="field-block" htmlFor="display-name">
-                Display Name
-                <input
-                  id="display-name"
-                  value={nameDraft}
-                  onChange={(event) => setNameDraft(event.target.value)}
-                  placeholder="Your name"
-                />
-              </label>
+            </label>
 
-              <label className="field-block">
-                Response Style
-                <CustomDropdown
-                  value={styleDraft}
-                  options={(Object.keys(RESPONSE_STYLE_LABELS) as ResponseStyle[]).map(
-                    (style) => ({
-                      value: style,
-                      label: RESPONSE_STYLE_LABELS[style],
-                    }),
-                  )}
-                  onChange={setStyleDraft}
-                />
-              </label>
+            <label className="dashv2-field">
+              <span>Voice Language</span>
+              <CustomDropdown
+                value={voiceLanguageDraft}
+                options={(Object.keys(VOICE_LANGUAGE_LABELS) as VoiceLanguage[]).map((lang) => ({
+                  value: lang,
+                  label: VOICE_LANGUAGE_LABELS[lang],
+                }))}
+                onChange={setVoiceLanguageDraft}
+              />
+            </label>
 
-              <label className="field-block">
-                Purpose
-                <CustomDropdown
-                  value={purposeDraft}
-                  options={(Object.keys(PURPOSE_LABELS) as PromptPurpose[]).map(
-                    (purpose) => ({
-                      value: purpose,
-                      label: PURPOSE_LABELS[purpose],
-                    }),
-                  )}
-                  onChange={setPurposeDraft}
-                />
-              </label>
-            </div>
-          </section>
-
-          <section className="personalize-panel">
-            <div className="panel-head">
-              <div>
-                <p className="panel-kicker">Experience</p>
-                <h3>Chat Experience</h3>
-              </div>
+            <label className="dashv2-field">
+              <span>Clear Chat Safety</span>
               <button
                 type="button"
-                className="secondary-button dashboard-save-button"
-                onClick={() => {
-                  onSaveExperienceSettings(
-                    enterToSendDraft,
-                    suggestionCountDraft,
-                    voiceLanguageDraft,
-                    readVoiceUriDraft,
-                    confirmClearDraft,
-                  )
-                  flashSavedState(setExperienceSaveState)
-                }}
+                className="dashv2-inline-button"
+                onClick={() => setConfirmClearDraft((prev) => !prev)}
               >
-                {experienceSaveState === 'saved' ? 'Saved' : 'Save experience'}
+                {confirmClearDraft ? 'Ask before clearing chats' : 'Clear chats immediately'}
+                <ChevronRight size={16} />
               </button>
-            </div>
-            <div className="personalize-grid">
-              <label className="field-block">
-                Enter Key Behavior
-                <button
-                  type="button"
-                  className="settings-item"
-                  onClick={() => setEnterToSendDraft((prev) => !prev)}
-                >
-                  {enterToSendDraft ? 'Enter sends message' : 'Enter adds new line'}
-                </button>
-              </label>
+            </label>
 
-              <label className="field-block">
-                Voice Language
-                <CustomDropdown
-                  value={voiceLanguageDraft}
-                  options={(Object.keys(VOICE_LANGUAGE_LABELS) as VoiceLanguage[]).map(
-                    (lang) => ({
-                      value: lang,
-                      label: VOICE_LANGUAGE_LABELS[lang],
-                    }),
-                  )}
-                  onChange={setVoiceLanguageDraft}
-                />
-              </label>
-
-              <label className="field-block">
-                Read Voice
-                <VoiceDropdown
-                  value={readVoiceUriDraft}
-                  options={readVoiceOptions}
-                  onChange={setReadVoiceUriDraft}
-                  onPreview={onPreviewVoice}
-                  previewingValue={previewingVoiceUri}
-                />
-              </label>
-
-              <label className="field-block">
-                Suggestion Cards
-                <CustomDropdown
-                  value={String(suggestionCountDraft) as '4' | '6'}
-                  options={[
-                    { value: '4', label: '4 cards' },
-                    { value: '6', label: '6 cards' },
-                  ]}
-                  onChange={(value) => setSuggestionCountDraft(value === '6' ? 6 : 4)}
-                />
-              </label>
-
-              <label className="field-block">
-                Clear Chats Safety
-                <button
-                  type="button"
-                  className="settings-item"
-                  onClick={() => setConfirmClearDraft((prev) => !prev)}
-                >
-                  {confirmClearDraft ? 'Ask before clearing chats' : 'Clear chats immediately'}
-                </button>
-              </label>
-            </div>
+            <button type="button" className="dashv2-save" onClick={saveExperienceDraft}>
+              {experienceSaveState === 'saved' ? 'Saved' : 'Save'}
+            </button>
           </section>
-        </section>
+        )}
 
-        <div className="dashboard-grid">
-          <button
-            className="settings-item"
-            onClick={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
-          >
-            {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-            Theme: {theme === 'light' ? 'Light' : 'Dark'}
-          </button>
+        {dashboardView === 'ai' && (
+          <section className="dashv2-section-card">
+            <label className="dashv2-field">
+              <span>Response Style</span>
+              <CustomDropdown
+                value={styleDraft}
+                options={(Object.keys(RESPONSE_STYLE_LABELS) as ResponseStyle[]).map((style) => ({
+                  value: style,
+                  label: RESPONSE_STYLE_LABELS[style],
+                }))}
+                onChange={setStyleDraft}
+              />
+            </label>
 
-          <button className="settings-item danger" onClick={() => void onClearChats()}>
-            <X size={16} />
-            Clear all chats
-          </button>
+            <label className="dashv2-field">
+              <span>Suggestion Cards</span>
+              <CustomDropdown
+                value={String(suggestionCountDraft) as '4' | '6'}
+                options={[
+                  { value: '4', label: '4 cards' },
+                  { value: '6', label: '6 cards' },
+                ]}
+                onChange={(value) => setSuggestionCountDraft(value === '6' ? 6 : 4)}
+              />
+            </label>
 
-          <button className="settings-item" onClick={() => void onLogout()}>
-            <LogOut size={16} />
-            Logout
-          </button>
-        </div>
+            <button
+              type="button"
+              className="dashv2-save"
+              onClick={() => {
+                savePersonalizationDraft()
+                saveExperienceDraft()
+              }}
+            >
+              Save
+            </button>
+          </section>
+        )}
+
+        {dashboardView === 'voice' && (
+          <section className="dashv2-section-card">
+            <label className="dashv2-field">
+              <span>Voice Input</span>
+              <CustomDropdown
+                value={voiceLanguageDraft}
+                options={(Object.keys(VOICE_LANGUAGE_LABELS) as VoiceLanguage[]).map((lang) => ({
+                  value: lang,
+                  label: VOICE_LANGUAGE_LABELS[lang],
+                }))}
+                onChange={setVoiceLanguageDraft}
+              />
+            </label>
+
+            <label className="dashv2-field">
+              <span>Read Voice</span>
+              <VoiceDropdown
+                value={readVoiceUriDraft}
+                options={readVoiceOptions}
+                onChange={setReadVoiceUriDraft}
+                onPreview={onPreviewVoice}
+                previewingValue={previewingVoiceUri}
+              />
+            </label>
+
+            <label className="dashv2-switch-row">
+              <span>
+                Read Responses Aloud
+                <small>Messages will be read aloud after sending</small>
+              </span>
+              <button
+                type="button"
+                className={`dashv2-toggle ${readAfterSendDraft ? 'on' : ''}`}
+                onClick={() => setReadAfterSendDraft((prev) => !prev)}
+                aria-label="Toggle read responses aloud"
+              >
+                <span />
+              </button>
+            </label>
+
+            <button type="button" className="dashv2-save" onClick={saveExperienceDraft}>
+              {experienceSaveState === 'saved' ? 'Saved' : 'Save'}
+            </button>
+          </section>
+        )}
+
+        {dashboardView === 'appearance' && (
+          <section className="dashv2-section-card">
+            <label className="dashv2-field">
+              <span>Adaptive Colors</span>
+              <button
+                type="button"
+                className="dashv2-inline-button"
+                onClick={() =>
+                  setThemeDraft((prev) => (prev === 'light' ? 'dark' : 'light'))
+                }
+              >
+                {themeDraft === 'light' ? 'Light (Default)' : 'Dark'}
+                <ChevronRight size={16} />
+              </button>
+            </label>
+
+            <label className="dashv2-field">
+              <span>Notifications</span>
+              <button type="button" className="dashv2-inline-button" onClick={() => {}}>
+                Enabled
+                <ChevronRight size={16} />
+              </button>
+            </label>
+
+            <button
+              type="button"
+              className="dashv2-save"
+              onClick={() => {
+                setTheme(themeDraft)
+                setDashboardView('main')
+              }}
+            >
+              Save
+            </button>
+          </section>
+        )}
+
+        {dashboardView === 'privacy' && (
+          <section className="dashv2-section-card">
+            <label className="dashv2-field">
+              <span>Tokens Usage</span>
+              <div className="dashv2-inline-value">
+                Tokens, {totalResponseTokens.toLocaleString()}
+              </div>
+            </label>
+
+            <label className="dashv2-switch-row">
+              <span>
+                Data Analytics
+                <small>Allow collection of anonymous usage data</small>
+              </span>
+              <button
+                type="button"
+                className={`dashv2-toggle ${dataAnalyticsDraft ? 'on' : ''}`}
+                onClick={() => setDataAnalyticsDraft((prev) => !prev)}
+                aria-label="Toggle data analytics"
+              >
+                <span />
+              </button>
+            </label>
+
+            <label className="dashv2-field">
+              <span>Data Storage</span>
+              <div className="dashv2-inline-value">
+                30 days (Default)
+              </div>
+            </label>
+
+            <label className="dashv2-switch-row">
+              <span>
+                Chat Export
+                <small>Enable export and download of chat history</small>
+              </span>
+              <button
+                type="button"
+                className={`dashv2-toggle ${chatExportDraft ? 'on' : ''}`}
+                onClick={() => setChatExportDraft((prev) => !prev)}
+                aria-label="Toggle chat export"
+              >
+                <span />
+              </button>
+            </label>
+
+            <button
+              type="button"
+              className="dashv2-save"
+              onClick={onExportChats}
+              disabled={!chatExportDraft}
+              aria-disabled={!chatExportDraft}
+            >
+              <Download size={16} />
+              Export chats (.json)
+            </button>
+
+            <button type="button" className="dashv2-save danger" onClick={() => void onClearChats()}>
+              <X size={16} />
+              Clear all chats
+            </button>
+
+            <button type="button" className="dashv2-save" onClick={savePrivacyDraft}>
+              Save
+            </button>
+          </section>
+        )}
       </div>
     </div>
   )
@@ -2896,6 +3842,7 @@ function SharedConversationView() {
   const [error, setError] = useState('')
   const [title, setTitle] = useState('Shared Conversation')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [copiedSharedMessageId, setCopiedSharedMessageId] = useState<string | null>(null)
 
   const visibleMessages = useMemo(() => {
     const normalized = (value: string) =>
@@ -2916,6 +3863,12 @@ function SharedConversationView() {
       return accumulator
     }, [])
   }, [messages])
+
+  const handleCopySharedMessage = (messageId: string, content: string) => {
+    void navigator.clipboard.writeText(content)
+    setCopiedSharedMessageId(messageId)
+    setTimeout(() => setCopiedSharedMessageId(null), 2000)
+  }
 
   useEffect(() => {
     if (!supabase) {
@@ -3028,40 +3981,49 @@ function SharedConversationView() {
                     key={message.id}
                     className={`message-row ${message.role === 'user' ? 'user-row' : 'assistant-row'}`}
                   >
-                    <div className={`bubble ${message.role}`}>
-                      {message.role === 'assistant' ? (
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            code: ({ node, className, children, ...props }) => {
-                              const code = String(children)
-                              const language = className?.replace('language-', '')
-                              const meta =
-                                ((node as { data?: { meta?: string }; meta?: string } | undefined)
-                                  ?.data?.meta ||
-                                  (node as { meta?: string } | undefined)?.meta ||
-                                  '')
-                              const isBlock = Boolean(language) || code.includes('\n')
+                    {message.role === 'assistant' ? (
+                      <div className="assistant-bubble-wrap shared-assistant-bubble-wrap">
+                        <img
+                          className="assistant-message-logo shared-assistant-logo"
+                          src="/llama_logo_transparent.png"
+                          alt="Llama AI"
+                        />
+                        <div className="bubble assistant">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              code: ({ node, className, children, ...props }) => {
+                                const code = String(children)
+                                const language = className?.replace('language-', '')
+                                const meta =
+                                  ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                                    ?.data?.meta ||
+                                    (node as { meta?: string } | undefined)?.meta ||
+                                    '')
+                                const isBlock = Boolean(language) || code.includes('\n')
 
-                              if (isBlock) {
+                                if (isBlock) {
+                                  return (
+                                    <CopyableCodeBlock language={language} meta={meta}>
+                                      {code}
+                                    </CopyableCodeBlock>
+                                  )
+                                }
+
                                 return (
-                                  <CopyableCodeBlock language={language} meta={meta}>
-                                    {code}
-                                  </CopyableCodeBlock>
+                                  <code className={className} {...props}>
+                                    {children}
+                                  </code>
                                 )
-                              }
-
-                              return (
-                                <code className={className} {...props}>
-                                  {children}
-                                </code>
-                              )
-                            },
-                          }}
-                        >
-                          {cleanAssistantOutput(message.content)}
-                        </ReactMarkdown>
-                      ) : (
+                              },
+                            }}
+                          >
+                            {cleanAssistantOutput(message.content)}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bubble user">
                         <p>
                           {message.content
                             .replace(/\[Image:\s*[^\]]+\]/g, '')
@@ -3070,16 +4032,25 @@ function SharedConversationView() {
                               ? 'Image sent'
                               : message.content)}
                         </p>
-                      )}
-                    </div>
-                    {message.role === 'assistant' && (
-                      <div className="message-actions message-actions-outside">
+                      </div>
+                    )}
+                    <div className="message-actions message-actions-outside shared-message-actions">
+                      <button
+                        type="button"
+                        className={`ghost-button action-btn message-action-icon ${copiedSharedMessageId === message.id ? 'copied' : ''}`}
+                        onClick={() => handleCopySharedMessage(message.id, message.content)}
+                        title={copiedSharedMessageId === message.id ? 'Copied' : 'Copy'}
+                        aria-label={copiedSharedMessageId === message.id ? 'Copied' : 'Copy'}
+                      >
+                        {copiedSharedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
+                      </button>
+                      {message.role === 'assistant' && (
                         <span className="message-model-pill" title="Model used">
                           <Cpu size={16} />
                           {MODEL_ENGINE_LABELS[messageModel || 'llama']}
                         </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </article>
                 )
               })}
@@ -3119,6 +4090,7 @@ function App() {
   const [displayName, setDisplayName] = useState('')
   const [responseStyle, setResponseStyle] = useState<ResponseStyle>('balanced')
   const [enterToSend, setEnterToSend] = useState(true)
+  const [readAfterSend, setReadAfterSend] = useState(false)
   const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('en-US')
   const [readVoiceUri, setReadVoiceUri] = useState('default')
   const [suggestionCount, setSuggestionCount] = useState<4 | 6>(4)
@@ -3129,6 +4101,23 @@ function App() {
   const [scrollAnchorMessageId, setScrollAnchorMessageId] = useState<string | null>(null)
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
   const [pendingClearChats, setPendingClearChats] = useState(false)
+  const [shareDialogData, setShareDialogData] = useState<ShareDialogData | null>(null)
+  const [shareDialogCopied, setShareDialogCopied] = useState(false)
+    const estimateTokenCount = (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed) return 0
+      const words = trimmed.split(/\s+/).length
+      // Approximation for GPT-style tokenization across plain text responses.
+      return Math.max(1, Math.round(words * 1.33))
+    }
+
+    const totalResponseTokens = useMemo(() => {
+      return Object.values(messagesMap)
+        .flat()
+        .filter((message) => message.role === 'assistant')
+        .reduce((sum, message) => sum + estimateTokenCount(message.content), 0)
+    }, [messagesMap])
+
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const noticeTimerRef = useRef<number | null>(null)
@@ -3168,6 +4157,32 @@ function App() {
     url.search = ''
     url.hash = ''
     return url.toString()
+  }
+
+  const formatShareCreatedAt = (createdAt: string) => {
+    const date = new Date(createdAt)
+    const now = new Date()
+
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+    const diffDays = Math.floor((startToday.getTime() - startDate.getTime()) / 86_400_000)
+    const timeLabel = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date)
+
+    if (diffDays <= 0) return `Created Today, ${timeLabel}`
+    if (diffDays === 1) return `Created Yesterday, ${timeLabel}`
+    return `Created ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)}, ${timeLabel}`
+  }
+
+  const closeShareDialog = () => {
+    setShareDialogData(null)
+    setShareDialogCopied(false)
+  }
+
+  const openShareUrl = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const ensureConversationIsShared = async (conversationId: string) => {
@@ -3212,22 +4227,69 @@ function App() {
     if (!shareToken) return
 
     const url = getConversationLink(shareToken)
-    const title =
-      conversations.find((item) => item.id === conversationId)?.title ||
-      'Llama AI Conversation'
+    const conversation = conversations.find((item) => item.id === conversationId)
+    const title = conversation?.title || 'Llama AI Conversation'
+    const createdAt = conversation?.created_at || new Date().toISOString()
+
+    setShareDialogCopied(false)
+    setShareDialogData({ title, url, createdAt })
+  }
+
+  const onCopyShareLink = async () => {
+    if (!shareDialogData) return
+    const copied = await copyText(shareDialogData.url)
+    if (copied) {
+      setShareDialogCopied(true)
+      showNotice('Conversation link copied.')
+    } else {
+      showNotice('Could not copy conversation link.')
+    }
+  }
+
+  const onShareViaMessages = () => {
+    if (!shareDialogData) return
+    const payload = encodeURIComponent(`${shareDialogData.title}\n${shareDialogData.url}`)
+    openShareUrl(`sms:?&body=${payload}`)
+  }
+
+  const onShareViaEmail = () => {
+    if (!shareDialogData) return
+    const subject = encodeURIComponent(`Shared chat: ${shareDialogData.title}`)
+    const body = encodeURIComponent(`${shareDialogData.title}\n\n${shareDialogData.url}`)
+    openShareUrl(`mailto:?subject=${subject}&body=${body}`)
+  }
+
+  const onShareViaWhatsApp = () => {
+    if (!shareDialogData) return
+    const text = encodeURIComponent(`${shareDialogData.title}\n${shareDialogData.url}`)
+    openShareUrl(`https://wa.me/?text=${text}`)
+  }
+
+  const onShareViaTelegram = () => {
+    if (!shareDialogData) return
+    const text = encodeURIComponent(shareDialogData.title)
+    const url = encodeURIComponent(shareDialogData.url)
+    openShareUrl(`https://t.me/share/url?url=${url}&text=${text}`)
+  }
+
+  const onShareViaMore = async () => {
+    if (!shareDialogData) return
 
     if (navigator.share) {
       try {
-        await navigator.share({ title, url })
+        await navigator.share({
+          title: shareDialogData.title,
+          text: shareDialogData.title,
+          url: shareDialogData.url,
+        })
         showNotice('Conversation shared.')
         return
       } catch {
-        // Fallback to clipboard when share target is not available.
+        // fallback to clipboard below
       }
     }
 
-    const copied = await copyText(url)
-    showNotice(copied ? 'Conversation link copied.' : 'Could not share conversation.')
+    await onCopyShareLink()
   }
 
   const onSavePersonalization = (
@@ -3250,6 +4312,7 @@ function App() {
 
   const onSaveExperienceSettings = (
     nextEnterToSend: boolean,
+    nextReadAfterSend: boolean,
     nextSuggestionCount: 4 | 6,
     nextVoiceLanguage: VoiceLanguage,
     nextReadVoiceUri: string,
@@ -3258,12 +4321,14 @@ function App() {
     if (!session?.user) return
 
     setEnterToSend(nextEnterToSend)
+    setReadAfterSend(nextReadAfterSend)
     setSuggestionCount(nextSuggestionCount)
     setVoiceLanguage(nextVoiceLanguage)
     setReadVoiceUri(nextReadVoiceUri)
     setConfirmClearChats(nextConfirmClearChats)
 
     localStorage.setItem(`enter-to-send:${session.user.id}`, String(nextEnterToSend))
+    localStorage.setItem(`read-after-send:${session.user.id}`, String(nextReadAfterSend))
     localStorage.setItem(
       `suggestion-count:${session.user.id}`,
       String(nextSuggestionCount),
@@ -3322,6 +4387,7 @@ function App() {
     const storedStyle = localStorage.getItem(`response-style:${keyPrefix}`)
     const storedPurpose = localStorage.getItem(`prompt-purpose:${keyPrefix}`)
     const storedEnterToSend = localStorage.getItem(`enter-to-send:${keyPrefix}`)
+    const storedReadAfterSend = localStorage.getItem(`read-after-send:${keyPrefix}`)
     const storedSuggestionCount = localStorage.getItem(`suggestion-count:${keyPrefix}`)
     const storedVoiceLanguage = localStorage.getItem(`voice-language:${keyPrefix}`)
     const storedReadVoiceUri = localStorage.getItem(`read-voice-uri:${keyPrefix}`)
@@ -3356,6 +4422,7 @@ function App() {
 
     setPromptPurpose(resolvedPurpose)
     setEnterToSend(storedEnterToSend !== 'false')
+    setReadAfterSend(storedReadAfterSend === 'true')
     setSuggestionCount(resolvedSuggestionCount)
     setVoiceLanguage(resolvedVoiceLanguage)
     setReadVoiceUri(storedReadVoiceUri || 'default')
@@ -3545,7 +4612,7 @@ function App() {
 
     if (skippedUpdate) {
       window.setTimeout(() => {
-        void refreshMessages(conversationId)
+        void refreshMessages(conversationId, true)
       }, 450)
     } else {
       const remappedImageEntries = mapImageDataToFetchedMessageIds(
@@ -3563,7 +4630,7 @@ function App() {
 
       if (preserveStreamedMessages && needsAssistantRetry) {
         window.setTimeout(() => {
-          void refreshMessages(conversationId)
+          void refreshMessages(conversationId, true)
         }, 450)
       }
     }
@@ -4020,6 +5087,56 @@ function App() {
     await performClearChats()
   }
 
+  const onExportChats = () => {
+    if (!session?.user) return
+
+    if (conversations.length === 0) {
+      showNotice('No chats available to export yet.')
+      return
+    }
+
+    const exportPayload = {
+      exported_at: new Date().toISOString(),
+      user_id: session.user.id,
+      totals: {
+        conversations: conversations.length,
+        messages: Object.values(messagesMap).reduce((sum, items) => sum + items.length, 0),
+      },
+      conversations: conversations.map((conversation) => ({
+        id: conversation.id,
+        title: conversation.title,
+        created_at: conversation.created_at,
+        is_shared: conversation.is_shared ?? false,
+        messages: (messagesMap[conversation.id] || [])
+          .slice()
+          .sort((a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+          )
+          .map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            created_at: message.created_at,
+            model: getMessageModel(message),
+          })),
+      })),
+    }
+
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    link.href = url
+    link.download = `llama-ai-chat-export-${timestamp}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    showNotice('Chat export downloaded.')
+  }
+
   const performClearChats = async () => {
     if (!supabase || !session?.user) return
 
@@ -4095,7 +5212,6 @@ function App() {
         .reverse()
         .find((message) => message.role === 'assistant' && getMessageModel(message))
         ?.model_used
-    moveConversationToTop(conversationId)
     setActiveConversationId(conversationId)
     if (isAIModel(modelForConversation)) {
       setSelectedModel(modelForConversation)
@@ -4211,11 +5327,11 @@ function App() {
                 activeConversationModel={activeConversationModel}
                 activeMessages={activeMessages}
                 scrollAnchorMessageId={scrollAnchorMessageId}
-                promptPurpose={promptPurpose}
                 promptCards={promptCards}
                 draft={draft}
                 selectedModel={selectedModel}
                 enterToSend={enterToSend}
+                readAfterSend={readAfterSend}
                 voiceLanguage={voiceLanguage}
                 readVoiceUri={readVoiceUri}
                 isAnalyzingImage={isAnalyzingImage}
@@ -4262,12 +5378,14 @@ function App() {
                   (sum, items) => sum + items.length,
                   0,
                 )}
+                totalResponseTokens={totalResponseTokens}
                 theme={theme}
                 setTheme={setTheme}
                 displayName={displayName}
                 responseStyle={responseStyle}
                 promptPurpose={promptPurpose}
                 enterToSend={enterToSend}
+                readAfterSend={readAfterSend}
                 suggestionCount={suggestionCount}
                 voiceLanguage={voiceLanguage}
                 readVoiceUri={readVoiceUri}
@@ -4275,6 +5393,7 @@ function App() {
                 onSavePersonalization={onSavePersonalization}
                 onSaveExperienceSettings={onSaveExperienceSettings}
                 onClearChats={onClearChats}
+                onExportChats={onExportChats}
                 onLogout={onLogout}
               />
             )
@@ -4282,6 +5401,62 @@ function App() {
         />
         <Route path="*" element={<Navigate to={session ? '/chat' : '/'} replace />} />
       </Routes>
+
+      {shareDialogData && (
+        <div className="modal-backdrop" onClick={closeShareDialog}>
+          <div className="share-chat-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="share-chat-modal-head">
+              <span className="share-chat-head-icon" aria-hidden="true">
+                <Share2 size={16} />
+              </span>
+              <h3>Share Chat</h3>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={closeShareDialog}
+                aria-label="Close share dialog"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="share-chat-card">
+              <img src="/llama_logo_transparent.png" alt="Llama AI" className="share-chat-logo" />
+              <div className="share-chat-copy">
+                <p>{shareDialogData.title}</p>
+                <span>{formatShareCreatedAt(shareDialogData.createdAt)}</span>
+              </div>
+            </div>
+
+            <div className="share-chat-actions-grid">
+              <button type="button" className="share-action-tile" onClick={() => void onCopyShareLink()}>
+                <span className="share-action-icon">{shareDialogCopied ? <Check size={20} /> : <Link2 size={20} />}</span>
+                <span>{shareDialogCopied ? 'Copied' : 'Copy Link'}</span>
+              </button>
+              <button type="button" className="share-action-tile" onClick={onShareViaMessages}>
+                <span className="share-action-icon share-action-icon-messages"><SiImessage size={20} /></span>
+                <span>Messages</span>
+              </button>
+              <button type="button" className="share-action-tile" onClick={onShareViaEmail}>
+                <span className="share-action-icon share-action-icon-email"><SiGmail size={20} /></span>
+                <span>Email</span>
+              </button>
+              <button type="button" className="share-action-tile" onClick={onShareViaWhatsApp}>
+                <span className="share-action-icon share-action-icon-whatsapp"><SiWhatsapp size={20} /></span>
+                <span>WhatsApp</span>
+              </button>
+              <button type="button" className="share-action-tile" onClick={onShareViaTelegram}>
+                <span className="share-action-icon share-action-icon-telegram"><SiTelegram size={20} /></span>
+                <span>Telegram</span>
+              </button>
+              <button type="button" className="share-action-tile" onClick={() => void onShareViaMore()}>
+                <span className="share-action-icon"><MoreHorizontal size={20} /></span>
+                <span>More</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingClearChats && (
         <div className="modal-backdrop" onClick={onCancelClearChats}>

@@ -1,0 +1,28 @@
+{
+  "name": "Llama AI",
+  "short_name": "Llama AI",
+  "description": "Llama AI assistant as an installable PWA.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f1219",
+  "theme_color": "#8f43ff",
+  "icons": [
+    {
+      "src": "/brand_logo_zoom.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand_logo_zoom.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand_logo_zoom.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ]
+}
