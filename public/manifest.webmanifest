@@ -9,17 +9,17 @@
   "theme_color": "#8f43ff",
   "icons": [
     {
-      "src": "/brand_logo_zoom.png",
+      "src": "/brand_logo_zoom_out.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/brand_logo_zoom.png",
+      "src": "/brand_logo_zoom_out.png",
       "sizes": "512x512",
       "type": "image/png"
     },
     {
-      "src": "/brand_logo_zoom.png",
+      "src": "/brand_logo_zoom_out.png",
       "sizes": "any",
       "type": "image/png",
       "purpose": "maskable any"

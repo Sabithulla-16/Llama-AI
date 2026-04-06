@@ -1,4 +1,4 @@
-const CACHE_NAME = 'llama-ai-cache-v1'
+const CACHE_NAME = 'llama-ai-cache-v2'
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/brand_logo_zoom.png']
 
 self.addEventListener('install', (event) => {
@@ -51,18 +51,20 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Static assets: cache first, then network.
+  // Static assets: network first, then cache fallback to avoid stale app bundles.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached
-
-      return fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         const responseClone = response.clone()
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(request, responseClone)
         })
         return response
       })
-    }),
+      .catch(async () => {
+        const cached = await caches.match(request)
+        if (cached) return cached
+        throw new Error('Network unavailable and no cached asset found')
+      }),
   )
 })

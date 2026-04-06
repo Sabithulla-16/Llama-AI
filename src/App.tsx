@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -159,78 +159,79 @@ const getMessageModel = (message: ChatMessage): AIModel | null => {
 }
 const PURPOSE_PROMPTS: Record<PromptPurpose, string[]> = {
   general: [
-    'Explain AI',
-    'Plan my day',
+    'Write email',
     'Summarize text',
-    'Meeting notes',
-    'Give ideas',
-    'Quick checklist',
+    'Explain simply',
+    'Brainstorm ideas',
+    'Plan my day',
+    'Create checklist',
   ],
   coding: [
-    'Write Python',
-    'Fix bug fast',
-    'Regex help',
-    'SQL query',
-    'Refactor code',
-    'Code review',
+    'Debug this code',
+    'Explain this code',
+    'Write unit tests',
+    'Optimize performance',
+    'Generate SQL query',
+    'Refactor this function',
   ],
   business: [
-    'Startup ideas',
-    'Product copy',
-    'Landing page',
-    'Pitch outline',
-    'Roadmap draft',
-    'Market angle',
+    'Write marketing copy',
+    'Draft sales email',
+    'Create business plan',
+    'Analyze competitors',
+    'Build pitch deck outline',
+    'Generate ad headlines',
   ],
   study: [
-    'Study plan',
-    'Concept notes',
-    'Quiz me',
-    'Explain simply',
-    'Revision list',
-    'Topic summary',
+    'Explain this topic',
+    'Create study plan',
+    'Quiz me on this',
+    'Summarize chapter',
+    'Make flashcards',
+    'Solve step by step',
   ],
   writing: [
-    'Email draft',
-    'Rewrite concise',
-    'Blog outline',
-    'Headline ideas',
-    'Tone improve',
-    'Proofread text',
+    'Rewrite for clarity',
+    'Fix grammar',
+    'Summarize this text',
+    'Write social post',
+    'Generate blog outline',
+    'Improve tone',
   ],
 }
 
 const PROMPT_HELP_TEXT: Record<string, string> = {
-  'Explain AI': 'Understand how artificial intelligence works in simple terms.',
+  'Write email': 'Draft a professional email with clear tone and structure.',
   'Plan my day': 'Organize your tasks, priorities, and schedule quickly.',
-  'Summarize text': 'Get concise summaries for articles or long notes.',
-  'Give ideas': 'Generate creative ideas for projects or problem solving.',
-  'Meeting notes': 'Convert rough notes into clean actionable summaries.',
-  'Quick checklist': 'Create a practical checklist for your next task.',
-  'Write Python': 'Generate clean Python code for your requirement.',
-  'Fix bug fast': 'Get likely fixes and debugging steps quickly.',
-  'Regex help': 'Build and explain regular expressions clearly.',
-  'SQL query': 'Write or improve SQL queries for your data.',
-  'Refactor code': 'Improve readability and structure with safer refactors.',
-  'Code review': 'Review code for bugs, risks, and improvements.',
-  'Startup ideas': 'Brainstorm startup concepts with clear market opportunities.',
-  'Product copy': 'Create compelling product descriptions and value-focused copy.',
-  'Landing page': 'Draft high-converting landing page sections and messaging.',
-  'Pitch outline': 'Build a persuasive pitch structure for your idea.',
-  'Roadmap draft': 'Turn goals into a simple milestone-based execution roadmap.',
-  'Market angle': 'Identify positioning angles to stand out from competitors.',
-  'Study plan': 'Create a structured plan with topics and daily targets.',
-  'Concept notes': 'Summarize key concepts into clear, revision-friendly notes.',
-  'Quiz me': 'Generate quiz questions to test your understanding quickly.',
+  'Summarize text': 'Summarize long text into key points and actionable takeaways.',
   'Explain simply': 'Break complex topics into easy, plain-language explanations.',
-  'Revision list': 'Build a focused revision checklist before exams or deadlines.',
-  'Topic summary': 'Condense a topic into concise, high-yield takeaways.',
-  'Email draft': 'Write a polished email with the right tone and clarity.',
-  'Rewrite concise': 'Rewrite your text to be shorter and more impactful.',
-  'Blog outline': 'Generate a clear blog structure with strong section flow.',
-  'Headline ideas': 'Create headline options optimized for clarity and click-through.',
-  'Tone improve': 'Adjust writing tone to match audience and context.',
-  'Proofread text': 'Fix grammar, clarity, and style issues in your writing.',
+  'Brainstorm ideas': 'Generate practical ideas for projects, content, or strategy.',
+  'Meeting notes': 'Convert rough notes into clean actionable summaries.',
+  'Create checklist': 'Create a practical checklist for your next task.',
+  'Debug this code': 'Find likely bugs and propose targeted fixes fast.',
+  'Explain this code': 'Break code down line by line in plain language.',
+  'Write unit tests': 'Generate practical unit tests for your function or module.',
+  'Optimize performance': 'Suggest performance improvements and cleaner alternatives.',
+  'Generate SQL query': 'Write SQL for filtering, joins, grouping, and reporting.',
+  'Refactor this function': 'Improve readability and maintainability without changing behavior.',
+  'Write marketing copy': 'Create clear, persuasive copy for products and campaigns.',
+  'Draft sales email': 'Write conversion-focused sales outreach emails quickly.',
+  'Create business plan': 'Turn an idea into a structured business plan.',
+  'Analyze competitors': 'Compare competitors and identify positioning opportunities.',
+  'Build pitch deck outline': 'Create a slide-by-slide pitch deck structure.',
+  'Generate ad headlines': 'Produce ad headline options optimized for clicks.',
+  'Explain this topic': 'Teach a topic simply with examples and key points.',
+  'Create study plan': 'Build a study schedule with milestones and review cycles.',
+  'Quiz me on this': 'Generate quiz questions to test understanding quickly.',
+  'Summarize chapter': 'Extract key ideas from chapters into compact notes.',
+  'Make flashcards': 'Turn concepts into fast-review flashcard prompts.',
+  'Solve step by step': 'Provide stepwise solutions with reasoning at each stage.',
+  'Rewrite for clarity': 'Rewrite text to be clearer and easier to read.',
+  'Fix grammar': 'Correct grammar, punctuation, and wording issues.',
+  'Summarize this text': 'Condense text while preserving core meaning.',
+  'Write social post': 'Draft engaging social media posts with strong hooks.',
+  'Generate blog outline': 'Create a logical blog structure with section ideas.',
+  'Improve tone': 'Adapt writing tone to audience and context.',
 }
 
 const PURPOSE_LABELS: Record<PromptPurpose, string> = {
@@ -276,6 +277,63 @@ const formatVoiceDisplayName = (rawName: string) => {
   name = name.replace(/\s*\([^)]*\)\s*$/, '').trim()
   name = name.replace(/\s{2,}/g, ' ').trim()
   return name || rawName
+}
+
+const VOICE_OPTION_VALUE_SEPARATOR = '::'
+
+const makeVoiceOptionValue = (voice: SpeechSynthesisVoice) =>
+  [voice.voiceURI || '', voice.name || '', voice.lang || '']
+    .map((part) => encodeURIComponent(part))
+    .join(VOICE_OPTION_VALUE_SEPARATOR)
+
+const parseVoiceOptionValue = (value: string) => {
+  const parts = value.split(VOICE_OPTION_VALUE_SEPARATOR)
+  if (parts.length !== 3) return null
+
+  return {
+    voiceURI: decodeURIComponent(parts[0] || ''),
+    name: decodeURIComponent(parts[1] || ''),
+    lang: decodeURIComponent(parts[2] || ''),
+  }
+}
+
+const findVoiceBySelection = (voices: SpeechSynthesisVoice[], selection: string) => {
+  if (!selection || selection === 'default') return null
+
+  const parsed = parseVoiceOptionValue(selection)
+  // Backward-compatible path for previously saved raw voiceURI values.
+  if (!parsed) {
+    return voices.find((voice) => voice.voiceURI === selection) || null
+  }
+
+  if (parsed.name && parsed.lang && parsed.voiceURI) {
+    const exactMatch = voices.find(
+      (voice) =>
+        voice.name === parsed.name &&
+        voice.lang.toLowerCase() === parsed.lang.toLowerCase() &&
+        voice.voiceURI === parsed.voiceURI,
+    )
+    if (exactMatch) return exactMatch
+  }
+
+  if (parsed.name && parsed.lang) {
+    const nameAndLangMatch = voices.find(
+      (voice) => voice.name === parsed.name && voice.lang.toLowerCase() === parsed.lang.toLowerCase(),
+    )
+    if (nameAndLangMatch) return nameAndLangMatch
+  }
+
+  if (parsed.name) {
+    const nameOnlyMatch = voices.find((voice) => voice.name === parsed.name)
+    if (nameOnlyMatch) return nameOnlyMatch
+  }
+
+  if (parsed.voiceURI) {
+    const uriMatch = voices.find((voice) => voice.voiceURI === parsed.voiceURI)
+    if (uriMatch) return uriMatch
+  }
+
+  return null
 }
 
 type DropdownOption<T extends string> = {
@@ -389,6 +447,7 @@ type VoiceDropdownProps = {
   options: DropdownOption<string>[]
   onChange: (value: string) => void
   onPreview: (value: string) => void
+  onOpen?: () => void
   previewingValue: string | null
   triggerClassName?: string
   menuClassName?: string
@@ -399,6 +458,7 @@ function VoiceDropdown({
   options,
   onChange,
   onPreview,
+  onOpen,
   previewingValue,
   triggerClassName = 'composer-select model-select-trigger',
   menuClassName = 'model-select-menu',
@@ -433,6 +493,7 @@ function VoiceDropdown({
 
   const toggleMenu = () => {
     if (!isOpen) {
+      onOpen?.()
       const trigger = triggerRef.current
       if (trigger) {
         const rect = trigger.getBoundingClientRect()
@@ -1268,6 +1329,7 @@ function AuthScreen() {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [pending, setPending] = useState(false)
   const [authPopup, setAuthPopup] = useState<{
@@ -1329,12 +1391,22 @@ function AuthScreen() {
     setPending(false)
   }
 
+  const toggleAuthMode = () => {
+    setIsSignUp((prev) => !prev)
+    setShowPassword(false)
+  }
+
   const onEmail = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!supabase) return
 
     if (isSignUp && username.trim().length < 2) {
       showAuthPopup('error', 'Please enter a username with at least 2 characters.')
+      return
+    }
+
+    if (isSignUp && password !== confirmPassword) {
+      showAuthPopup('error', 'Passwords do not match.')
       return
     }
 
@@ -1361,49 +1433,46 @@ function AuthScreen() {
     setPending(false)
   }
 
+  const authTabLabels = isSignUp
+    ? { left: 'Log in', right: 'Sign up' }
+    : { left: 'Log in', right: 'Sign up' }
+
   return (
     <div className="auth-wrap auth-v2">
       <div className="auth-v2-bg auth-v2-bg-desktop" aria-hidden="true" />
       <div className="auth-v2-bg auth-v2-bg-mobile" aria-hidden="true" />
 
-      <header className="auth-v2-topbar">
-        <div className="auth-v2-brand">
-          <img src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
-          <p>
-            Llama <span>AI</span>
-          </p>
-        </div>
-
-        <nav className="auth-v2-nav" aria-label="Auth page navigation">
-          <span>Features</span>
-          <span>Use Cases</span>
-          <span>Pricing</span>
-          <span>Docs</span>
-          <span>Contact</span>
-        </nav>
-
-        <div className="auth-v2-actions">
-          <button type="button" className="auth-v2-link" onClick={() => setIsSignUp(false)}>
-            Log in
-          </button>
-          <button type="button" className="auth-v2-cta" onClick={() => setIsSignUp(true)}>
-            Get Started
-          </button>
-        </div>
-      </header>
-
       <main className="auth-v2-main">
         <section className="auth-v2-hero">
           <img src="/llama_logo_transparent.png" alt="Llama AI" className="auth-v2-logo" />
           <h1>
-            Llama <span>AI</span>
+            Welcome to <span>Llama AI</span>
           </h1>
           <p className="auth-v2-subtitle">
-            {isSignUp ? 'Create an account' : 'Welcome Back'}
+            Sign in or create an account to continue.
           </p>
         </section>
 
         <section className="auth-v2-card">
+          <div className="auth-v2-segmented" role="tablist" aria-label="Authentication mode">
+            <button
+              type="button"
+              className={`auth-v2-segment ${!isSignUp ? 'active' : ''}`}
+              onClick={() => setIsSignUp(false)}
+              aria-pressed={!isSignUp}
+            >
+              {authTabLabels.left}
+            </button>
+            <button
+              type="button"
+              className={`auth-v2-segment ${isSignUp ? 'active' : ''}`}
+              onClick={() => setIsSignUp(true)}
+              aria-pressed={isSignUp}
+            >
+              {authTabLabels.right}
+            </button>
+          </div>
+
           {!supabase && (
             <p className="error-text">
               Missing Supabase keys. Set VITE_SUPABASE_URL and
@@ -1416,27 +1485,6 @@ function AuthScreen() {
               {authPopup.message}
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={onGoogle}
-            className="auth-v2-google"
-            disabled={pending || !supabase}
-          >
-            <svg className="auth-v2-google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg>
-            {isSignUp ? 'Sign up with Google' : 'Continue with Google'}
-          </button>
-
-          <div className="auth-v2-divider" aria-hidden="true">
-            <span />
-            <em>or</em>
-            <span />
-          </div>
 
           <form onSubmit={onEmail} className="auth-v2-form">
             {isSignUp && (
@@ -1453,16 +1501,31 @@ function AuthScreen() {
               </div>
             )}
 
-            <div className="auth-v2-input-wrap">
-              <Mail size={18} />
-              <input
-                type="email"
-                placeholder="Email ID"
-                required
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-            </div>
+            {isSignUp && (
+              <div className="auth-v2-input-wrap">
+                <Mail size={18} />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
+            )}
+
+            {!isSignUp && (
+              <div className="auth-v2-input-wrap">
+                <Mail size={18} />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+              </div>
+            )}
 
             <div className="auth-v2-input-wrap auth-v2-password-wrap">
               <Lock size={18} />
@@ -1493,34 +1556,76 @@ function AuthScreen() {
               )}
             </div>
 
-            <button
-              type="button"
-              className="auth-v2-forgot"
-              onClick={() => showAuthPopup('error', 'Password reset flow will be added soon.')}
-            >
-              Forgot password?
-            </button>
+            {isSignUp && (
+              <div className="auth-v2-input-wrap auth-v2-password-wrap">
+                <Lock size={18} />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Confirm Password"
+                  required
+                  minLength={6}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+                {confirmPassword.length > 0 && (
+                  <button
+                    type="button"
+                    className="auth-v2-password-toggle"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!isSignUp && (
+              <button
+                type="button"
+                className="auth-v2-forgot"
+                onClick={() => showAuthPopup('error', 'Password reset flow will be added soon.')}
+              >
+                Forgot password?
+              </button>
+            )}
 
             <button
               type="submit"
               className="auth-v2-submit"
               disabled={pending || !supabase}
             >
-              {pending ? 'Please wait...' : isSignUp ? 'Sign Up' : 'Login'}
+              {pending ? 'Please wait...' : isSignUp ? 'Sign Up' : 'Continue'}
             </button>
           </form>
 
+          <div className="auth-v2-divider auth-v2-divider-bottom" aria-hidden="true">
+            <span />
+            <em>or</em>
+            <span />
+          </div>
+
           <button
             type="button"
-            className="auth-v2-switch"
-            onClick={() => setIsSignUp((prev) => !prev)}
+            onClick={onGoogle}
+            className="auth-v2-google auth-v2-google-secondary"
+            disabled={pending || !supabase}
           >
-            {isSignUp ? (
-              <>Already have an account? <strong>Login</strong></>
-            ) : (
-              <>Don't have an account? <strong>Sign up</strong></>
-            )}
+            <svg className="auth-v2-google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            {isSignUp ? 'Sign up with Google' : 'Continue with Google'}
           </button>
+
+          {isSignUp && (
+            <button type="button" className="auth-v2-switch" onClick={toggleAuthMode}>
+              Already have an account? <strong>Log in</strong>
+            </button>
+          )}
         </section>
       </main>
     </div>
@@ -1542,23 +1647,42 @@ function LandingPage({ session }: LandingPageProps) {
     navigate(session ? '/dashboard' : '/auth')
   }
 
+  const landingFeatures = [
+    {
+      title: 'Write email',
+      description: 'Draft polished emails for work, support, follow-ups, and outreach.',
+      icon: <Sparkles size={18} />,
+    },
+    {
+      title: 'Summarize text',
+      description: 'Condense articles, notes, and documents into clear key points.',
+      icon: <LayoutDashboard size={18} />,
+    },
+    {
+      title: 'Brainstorm ideas',
+      description: 'Generate practical ideas for content, business, and daily work.',
+      icon: <Palette size={18} />,
+    },
+    {
+      title: 'Explain simply',
+      description: 'Turn difficult topics into easy explanations anyone can understand.',
+      icon: <Cpu size={18} />,
+    },
+  ]
+
   return (
     <div className="landing-wrap">
-      <div className="landing-background landing-background-desktop" aria-hidden="true" />
-      <div className="landing-background landing-background-mobile" aria-hidden="true" />
-
       <header className="landing-topbar">
         <div className="landing-brand">
-          <img className="landing-brand-mark" src="/brand_logo_zoom.png" alt="" aria-hidden="true" />
+          <img className="landing-brand-mark" src="/brand_logo_zoom.png" alt="Llama AI logo" />
           <p>Llama AI</p>
         </div>
 
         <nav className="landing-nav" aria-label="Primary">
+          <span>Chat</span>
           <span>Features</span>
-          <span>Use Cases</span>
           <span>Pricing</span>
-          <span>Docs</span>
-          <span>Contact</span>
+          <span>Resources</span>
         </nav>
 
         <div className="landing-topbar-actions">
@@ -1566,28 +1690,60 @@ function LandingPage({ session }: LandingPageProps) {
             Log in
           </button>
           <button className="landing-nav-button landing-nav-button-strong" type="button" onClick={primaryAction}>
-            Get Started
+            Sign up
           </button>
         </div>
       </header>
 
       <main className="landing-hero">
-        <img className="landing-hero-logo" src="/llama_logo_transparent.png" alt="Llama AI logo" />
-        <h1>
-          Llama <span>AI</span>
-        </h1>
-        <p className="landing-subtext landing-subtext-center">
-          Your intelligent AI assistant
-          <br />
-          for everything you need.
+        <section className="landing-hero-copy">
+          <h1>
+            Your AI Assistant,
+            <br />
+            <span>Anytime.</span>
+          </h1>
+          <p className="landing-subtext landing-subtext-center">
+            Boost your productivity with Llama AI to organize tasks, generate ideas, and
+            summarize information effortlessly.
+          </p>
+          <button className="landing-hero-cta" type="button" onClick={primaryAction}>
+            Get Started
+          </button>
+        </section>
+
+        <section className="landing-hero-visual" aria-hidden="true">
+          <img className="landing-hero-logo" src="/llama_logo_transparent.png" alt="" />
+        </section>
+      </main>
+
+      <section className="landing-feature-section" aria-label="Features">
+        <h2>
+          How <span>Llama AI</span> can help you
+        </h2>
+        <p>Discover the powerful features that make Llama AI your ideal AI assistant.</p>
+        <div className="landing-feature-grid">
+          {landingFeatures.map((feature) => (
+            <article key={feature.title} className="landing-feature-card">
+              <span className="landing-feature-icon" aria-hidden="true">
+                {feature.icon}
+              </span>
+              <h3>{feature.title}</h3>
+              <p>{feature.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-bottom-cta" aria-label="Get started">
+        <h2>Effortless assistance at your fingertips.</h2>
+        <p>
+          Join <strong>Llama AI</strong> today and transform your productivity with an
+          intelligent AI assistant available 24/7.
         </p>
         <button className="landing-hero-cta" type="button" onClick={primaryAction}>
-          <span>Get Started</span>
-          <span aria-hidden="true" className="landing-hero-arrow">
-            →
-          </span>
+          Get Started
         </button>
-      </main>
+      </section>
     </div>
   )
 }
@@ -1706,6 +1862,7 @@ function ChatWorkspace({
   const recognitionRef = useRef<any>(null)
   const voiceBaseDraftRef = useRef('')
   const voiceFinalTranscriptRef = useRef('')
+  const lastVoiceTapAtRef = useRef(0)
   const keepVoiceListeningRef = useRef(false)
   const voiceRestartTimerRef = useRef<number | null>(null)
   const maxComposerHeight = 180
@@ -1760,6 +1917,13 @@ function ChatWorkspace({
       setPreviewImageUrl(dataUrl)
     }
     reader.readAsDataURL(file)
+  }
+
+  const resizeComposerTextarea = (textarea: HTMLTextAreaElement) => {
+    textarea.style.height = 'auto'
+    const nextHeight = Math.min(maxComposerHeight, textarea.scrollHeight)
+    textarea.style.height = `${Math.max(52, nextHeight)}px`
+    textarea.style.overflowY = textarea.scrollHeight > maxComposerHeight ? 'auto' : 'hidden'
   }
 
   useEffect(() => {
@@ -1902,9 +2066,7 @@ function ChatWorkspace({
     const utterance = new SpeechSynthesisUtterance(nextChunk)
     utterance.lang = voiceLanguage
     if (readVoiceUri && readVoiceUri !== 'default') {
-      const selectedVoice = window.speechSynthesis
-        .getVoices()
-        .find((voice) => voice.voiceURI === readVoiceUri)
+      const selectedVoice = findVoiceBySelection(window.speechSynthesis.getVoices(), readVoiceUri)
       if (selectedVoice) {
         utterance.voice = selectedVoice
         utterance.lang = selectedVoice.lang || voiceLanguage
@@ -1940,9 +2102,10 @@ function ChatWorkspace({
 
   const beginReadTick = () => {
     clearReadTick()
+    const startAt = readStartedAtRef.current ?? Date.now()
+    readStartedAtRef.current = startAt
+
     readTickRef.current = window.setInterval(() => {
-      const startAt = readStartedAtRef.current
-      if (!startAt) return
       const elapsed = Date.now() - startAt
       setReadElapsedMs(elapsed)
       const boundaryProgress = Math.min(
@@ -1956,16 +2119,10 @@ function ChatWorkspace({
           : fallbackProgress
 
       setReadProgress((current) => Math.max(current, blendedProgress))
-    }, 160)
+    }, 140)
   }
 
-  const resizeComposerTextarea = (textarea: HTMLTextAreaElement) => {
-    textarea.style.height = 'auto'
-    const nextHeight = Math.min(textarea.scrollHeight, maxComposerHeight)
-    textarea.style.height = `${Math.max(nextHeight, 42)}px`
-  }
-
-  const smoothScrollToBottom = (durationMs = 340) => {
+  const smoothScrollToBottom = (durationMs = 220) => {
     const container = messageScrollRef.current
     if (!container) return
 
@@ -1975,7 +2132,7 @@ function ChatWorkspace({
     }
 
     const startTop = container.scrollTop
-    const targetTop = Math.max(0, container.scrollHeight - container.clientHeight)
+    const targetTop = container.scrollHeight - container.clientHeight
     const distance = targetTop - startTop
 
     if (distance <= 0) return
@@ -2111,16 +2268,20 @@ function ChatWorkspace({
     }
   }, [activeConversationId, isGenerating, visibleMessages.length])
 
-  useEffect(() => {
-    const SpeechRecognitionCtor =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  const getSpeechRecognitionCtor = useCallback(() => {
+    const speechApi =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition ||
+      (globalThis as any).SpeechRecognition ||
+      (globalThis as any).webkitSpeechRecognition
 
-    if (!SpeechRecognitionCtor) {
-      setIsVoiceSupported(false)
-      return
-    }
+    return typeof speechApi === 'function' ? speechApi : null
+  }, [])
 
-    setIsVoiceSupported(true)
+  const createSpeechRecognition = useCallback(() => {
+    const SpeechRecognitionCtor = getSpeechRecognitionCtor()
+    if (!SpeechRecognitionCtor) return null
+
     const recognition = new SpeechRecognitionCtor()
     recognition.lang = voiceLanguage
     recognition.continuous = true
@@ -2194,14 +2355,30 @@ function ChatWorkspace({
       clearVoiceRestartTimer()
     }
 
+    return recognition
+  }, [getSpeechRecognitionCtor, setDraft, voiceLanguage])
+
+  useEffect(() => {
+    const recognition = createSpeechRecognition()
+    if (!recognition) {
+      setIsVoiceSupported(false)
+      recognitionRef.current = null
+      return
+    }
+
+    setIsVoiceSupported(true)
     recognitionRef.current = recognition
+
     return () => {
       keepVoiceListeningRef.current = false
-      clearVoiceRestartTimer()
+      if (voiceRestartTimerRef.current) {
+        window.clearTimeout(voiceRestartTimerRef.current)
+        voiceRestartTimerRef.current = null
+      }
       recognition.stop()
       recognitionRef.current = null
     }
-  }, [setDraft, voiceLanguage])
+  }, [createSpeechRecognition])
 
   const toggleVoiceTyping = () => {
     const recognition = recognitionRef.current
@@ -2226,10 +2403,40 @@ function ChatWorkspace({
       voiceRestartTimerRef.current = null
     }
     try {
+      // Set immediately so mobile users get instant feedback while browser warms up mic.
+      setIsListening(true)
       recognition.start()
     } catch {
-      // Ignore repeated start errors from some browsers.
+      keepVoiceListeningRef.current = false
+      setIsListening(false)
+      window.alert('Unable to start voice typing on this browser session.')
     }
+  }
+
+  const handleVoiceButtonPress = () => {
+    const now = Date.now()
+    if (now - lastVoiceTapAtRef.current < 320) {
+      return
+    }
+    lastVoiceTapAtRef.current = now
+
+    if (!recognitionRef.current) {
+      const recognition = createSpeechRecognition()
+      if (recognition) {
+        recognitionRef.current = recognition
+        setIsVoiceSupported(true)
+      }
+    }
+
+    if (!recognitionRef.current) {
+      const unavailableMessage = window.isSecureContext
+        ? 'Voice typing is unavailable on this mobile browser.'
+        : 'Voice typing requires HTTPS (or localhost) on mobile.'
+      window.alert(unavailableMessage)
+      return
+    }
+
+    toggleVoiceTyping()
   }
 
   const handleReadAloud = (messageId: string, content: string) => {
@@ -2260,9 +2467,7 @@ function ChatWorkspace({
     readBoundaryCharRef.current = 0
     utterance.lang = voiceLanguage
     if (readVoiceUri && readVoiceUri !== 'default') {
-      const selectedVoice = window.speechSynthesis
-        .getVoices()
-        .find((voice) => voice.voiceURI === readVoiceUri)
+      const selectedVoice = findVoiceBySelection(window.speechSynthesis.getVoices(), readVoiceUri)
       if (selectedVoice) {
         utterance.voice = selectedVoice
         utterance.lang = selectedVoice.lang || voiceLanguage
@@ -3031,13 +3236,20 @@ function ChatWorkspace({
                 className={`composer-inline-mic composer-action-button voice-button ${
                   isListening ? 'listening' : ''
                 }`}
-                onClick={toggleVoiceTyping}
-                disabled={!isVoiceSupported}
+                onClick={handleVoiceButtonPress}
+                onTouchEnd={handleVoiceButtonPress}
                 aria-label={isListening ? 'Stop voice typing' : 'Start voice typing'}
-                title={isVoiceSupported ? 'Voice typing' : 'Voice typing unavailable'}
+                title={
+                  isVoiceSupported
+                    ? (isListening ? 'Stop voice typing' : 'Start voice typing')
+                    : 'Voice typing unavailable'
+                }
               >
-                {isListening && <span className="action-ring-loader" aria-hidden="true" />}
-                <Mic size={22} />
+                {isListening ? (
+                  <Square size={14} className="mic-recording-indicator" aria-hidden="true" />
+                ) : (
+                  <Mic size={22} />
+                )}
               </button>
             </div>
             {showImageModal && previewImageUrl && (
@@ -3176,6 +3388,7 @@ function Dashboard({
   const [readVoiceOptions, setReadVoiceOptions] = useState<Array<DropdownOption<string>>>([
     { value: 'default', label: 'Default voice (Auto)' },
   ])
+  const refreshReadVoiceOptionsRef = useRef<(() => void) | null>(null)
   const [confirmClearDraft, setConfirmClearDraft] = useState(confirmClearChats)
   const [personalizationSaveState, setPersonalizationSaveState] = useState<'idle' | 'saved'>('idle')
   const [experienceSaveState, setExperienceSaveState] = useState<'idle' | 'saved'>('idle')
@@ -3251,17 +3464,22 @@ function Dashboard({
     let pollTimer: number | null = null
     let pollAttempts = 0
     const updateVoiceOptions = () => {
-      const voices = synth.getVoices()
+      const voices = synth.getVoices().filter((voice) => Boolean(voice.voiceURI || voice.name))
       const filtered = voices.filter((voice) =>
         matchesVoiceLanguage(voice.lang || '', voiceLanguageDraft),
       )
-      // Online/Natural voices often hang on some browsers; prefer local voices for stability.
-      const stableVoices = filtered.filter((voice) => voice.localService)
-      const sourceVoices = stableVoices.length > 0 ? stableVoices : filtered
+      const languageScopedVoices = filtered.length > 0 ? filtered : voices
+      // Keep both local and online voices; some mobile browsers expose distinct voices as online-only.
+      const sourceVoices = [...languageScopedVoices].sort((a, b) => {
+        if (a.localService === b.localService) return 0
+        return a.localService ? -1 : 1
+      })
 
       const mapped = sourceVoices.map((voice) => ({
-        value: voice.voiceURI,
-        label: formatVoiceDisplayName(voice.name),
+        value: makeVoiceOptionValue(voice),
+        label: `${formatVoiceDisplayName(voice.name)} (${voice.lang || 'Unknown'})${
+          voice.localService ? '' : ' - Online'
+        }`,
       }))
       const seen = new Set<string>()
       const unique = mapped.filter((voice) => {
@@ -3276,7 +3494,7 @@ function Dashboard({
 
       if (
         readVoiceUriDraft !== 'default' &&
-        !sourceVoices.some((voice) => voice.voiceURI === readVoiceUriDraft)
+        !findVoiceBySelection(sourceVoices, readVoiceUriDraft)
       ) {
         setReadVoiceUriDraft('default')
       }
@@ -3286,6 +3504,8 @@ function Dashboard({
         pollTimer = null
       }
     }
+
+    refreshReadVoiceOptionsRef.current = updateVoiceOptions
 
     updateVoiceOptions()
     synth.addEventListener('voiceschanged', updateVoiceOptions)
@@ -3301,12 +3521,35 @@ function Dashboard({
     }, 400)
 
     return () => {
+      refreshReadVoiceOptionsRef.current = null
       synth.removeEventListener('voiceschanged', updateVoiceOptions)
       if (pollTimer) {
         window.clearInterval(pollTimer)
       }
     }
   }, [voiceLanguageDraft, readVoiceUriDraft])
+
+  const handleReadVoiceDropdownOpen = () => {
+    refreshReadVoiceOptionsRef.current?.()
+
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+
+    const synth = window.speechSynthesis
+    if (synth.getVoices().length > 0) return
+
+    try {
+      // Mobile browsers may expose voices only after a user-gesture speak/cancel cycle.
+      const unlockUtterance = new SpeechSynthesisUtterance(' ')
+      unlockUtterance.volume = 0
+      synth.speak(unlockUtterance)
+      window.setTimeout(() => {
+        synth.cancel()
+        refreshReadVoiceOptionsRef.current?.()
+      }, 150)
+    } catch {
+      // Ignore warm-up failures; fallback option remains available.
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -3319,11 +3562,11 @@ function Dashboard({
     }
   }, [])
 
-  const onPreviewVoice = (voiceUri: string) => {
+  const onPreviewVoice = (voiceSelection: string) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
 
     const synth = window.speechSynthesis
-    if (previewingVoiceUri === voiceUri) {
+    if (previewingVoiceUri === voiceSelection) {
       synth.cancel()
       setPreviewingVoiceUri(null)
       previewUtteranceRef.current = null
@@ -3337,10 +3580,8 @@ function Dashboard({
     )
     utterance.lang = voiceLanguageDraft
 
-    if (voiceUri !== 'default') {
-      const selectedVoice = synth
-        .getVoices()
-        .find((voice) => voice.voiceURI === voiceUri)
+    if (voiceSelection !== 'default') {
+      const selectedVoice = findVoiceBySelection(synth.getVoices(), voiceSelection)
       if (selectedVoice) {
         utterance.voice = selectedVoice
         utterance.lang = selectedVoice.lang || voiceLanguageDraft
@@ -3348,15 +3589,15 @@ function Dashboard({
     }
 
     utterance.onend = () => {
-      setPreviewingVoiceUri((current) => (current === voiceUri ? null : current))
+      setPreviewingVoiceUri((current) => (current === voiceSelection ? null : current))
       previewUtteranceRef.current = null
     }
     utterance.onerror = () => {
-      setPreviewingVoiceUri((current) => (current === voiceUri ? null : current))
+      setPreviewingVoiceUri((current) => (current === voiceSelection ? null : current))
       previewUtteranceRef.current = null
     }
 
-    setPreviewingVoiceUri(voiceUri)
+    setPreviewingVoiceUri(voiceSelection)
     previewUtteranceRef.current = utterance
     synth.speak(utterance)
   }
@@ -3701,6 +3942,7 @@ function Dashboard({
                 options={readVoiceOptions}
                 onChange={setReadVoiceUriDraft}
                 onPreview={onPreviewVoice}
+                onOpen={handleReadVoiceDropdownOpen}
                 previewingValue={previewingVoiceUri}
               />
             </label>
@@ -3843,6 +4085,7 @@ function SharedConversationView() {
   const [title, setTitle] = useState('Shared Conversation')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [copiedSharedMessageId, setCopiedSharedMessageId] = useState<string | null>(null)
+  const [readingSharedMessageId, setReadingSharedMessageId] = useState<string | null>(null)
 
   const visibleMessages = useMemo(() => {
     const normalized = (value: string) =>
@@ -3869,6 +4112,40 @@ function SharedConversationView() {
     setCopiedSharedMessageId(messageId)
     setTimeout(() => setCopiedSharedMessageId(null), 2000)
   }
+
+  const handleReadSharedMessage = (messageId: string, content: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+
+    if (readingSharedMessageId === messageId) {
+      window.speechSynthesis.cancel()
+      setReadingSharedMessageId(null)
+      return
+    }
+
+    window.speechSynthesis.cancel()
+
+    const plainText = content
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\*(.+?)\*/g, '$1')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`(.+?)`/g, '$1')
+      .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+      .replace(/#{1,6}\s/g, '')
+
+    const utterance = new SpeechSynthesisUtterance(plainText)
+    setReadingSharedMessageId(messageId)
+    utterance.onend = () => setReadingSharedMessageId(null)
+    utterance.onerror = () => setReadingSharedMessageId(null)
+    window.speechSynthesis.speak(utterance)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!supabase) {
@@ -4044,6 +4321,21 @@ function SharedConversationView() {
                       >
                         {copiedSharedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
                       </button>
+                      {message.role === 'assistant' && (
+                        <button
+                          type="button"
+                          className={`ghost-button action-btn message-action-icon ${readingSharedMessageId === message.id ? 'reading' : ''}`}
+                          onClick={() => handleReadSharedMessage(message.id, message.content)}
+                          title={readingSharedMessageId === message.id ? 'Reading...' : 'Read aloud'}
+                          aria-label={readingSharedMessageId === message.id ? 'Reading' : 'Read aloud'}
+                        >
+                          {readingSharedMessageId === message.id ? (
+                            <Loader2 size={16} className="action-icon-spin" />
+                          ) : (
+                            <Volume2 size={16} />
+                          )}
+                        </button>
+                      )}
                       {message.role === 'assistant' && (
                         <span className="message-model-pill" title="Model used">
                           <Cpu size={16} />
@@ -4684,6 +4976,7 @@ function App() {
     if (!supabase || !session?.user) return null
 
     const payload = {
+      user_id: session.user.id,
       title: 'New Chat',
     }
 
