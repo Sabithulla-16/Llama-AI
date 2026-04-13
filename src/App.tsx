@@ -248,6 +248,17 @@ const RESPONSE_STYLE_LABELS: Record<ResponseStyle, string> = {
   detailed: 'Detailed',
 }
 
+const CODE_BLOCK_EXPANSION_MEMORY = new Map<string, boolean>()
+
+const hashCodeBlockKey = (value: string) => {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
+  }
+  return String(hash)
+}
+
 const VOICE_LANGUAGE_LABELS: Record<VoiceLanguage, string> = {
   'en-US': 'English (US)',
   'en-GB': 'English (UK)',
@@ -1194,8 +1205,21 @@ function CopyableCodeBlock({
   const fileName = fileNameFromMeta || defaultFileName
   const LanguageIcon = languageMeta.icon
   const showLineNumbers = totalLines > 3
-  const [isExpanded, setIsExpanded] = useState(totalLines <= MAX_COLLAPSED_LINES)
+  const expansionKey = useMemo(
+    () => hashCodeBlockKey(`${language || 'text'}::${meta || ''}::${textContent}`),
+    [language, meta, textContent],
+  )
+  const defaultExpanded = totalLines <= MAX_COLLAPSED_LINES
+  const [isExpanded, setIsExpanded] = useState(() => {
+    const storedState = CODE_BLOCK_EXPANSION_MEMORY.get(expansionKey)
+    return storedState ?? defaultExpanded
+  })
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    const storedState = CODE_BLOCK_EXPANSION_MEMORY.get(expansionKey)
+    setIsExpanded(storedState ?? defaultExpanded)
+  }, [expansionKey, defaultExpanded])
 
   const isCollapsible = totalLines > MAX_COLLAPSED_LINES
   const isCollapsed = isCollapsible && !isExpanded
@@ -1223,6 +1247,14 @@ function CopyableCodeBlock({
     URL.revokeObjectURL(url)
   }
 
+  const onToggleExpanded = () => {
+    setIsExpanded((previous) => {
+      const next = !previous
+      CODE_BLOCK_EXPANSION_MEMORY.set(expansionKey, next)
+      return next
+    })
+  }
+
   return (
     <div className={`code-shell ${isCollapsed ? 'collapsed' : ''}`}>
       <div className="code-topbar">
@@ -1242,7 +1274,7 @@ function CopyableCodeBlock({
           {isCollapsible && (
             <button
               type="button"
-              onClick={() => setIsExpanded((prev) => !prev)}
+              onClick={onToggleExpanded}
               className="ghost-button code-button"
             >
               {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
@@ -4657,8 +4689,8 @@ function App() {
     const savedTheme = localStorage.getItem('theme-mode') as ThemeMode | null
     if (savedTheme === 'dark' || savedTheme === 'light') {
       setTheme(savedTheme)
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setTheme('dark')
+    } else {
+      setTheme('light')
     }
   }, [])
 

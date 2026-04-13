@@ -2294,6 +2294,7 @@ textarea:focus {
   align-items: flex-start;
   gap: 10px;
   width: 100%;
+  min-width: 0;
 }
 
 .assistant-message-logo {
@@ -2332,6 +2333,10 @@ textarea:focus {
 
 .bubble.assistant {
   background: var(--bubble-ai);
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .bubble p {
@@ -2358,6 +2363,7 @@ textarea:focus {
   overflow: hidden;
   background: var(--code-bg);
   margin-top: 10px;
+  max-width: 100%;
 }
 
 .code-topbar {
@@ -2436,6 +2442,7 @@ textarea:focus {
 
 .code-body {
   position: relative;
+  max-width: 100%;
 }
 
 .embedded-markdown-code {
@@ -2483,6 +2490,7 @@ textarea:focus {
   overflow: auto;
   margin: 0;
   padding: 14px;
+  max-width: 100%;
 }
 
 .code-shell pre span,
