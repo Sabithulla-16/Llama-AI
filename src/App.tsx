@@ -67,6 +67,7 @@ import {
   SendHorizontal,
   Square,
   ImagePlus,
+  Images,
   LayoutDashboard,
   Trash2,
   LogOut,
@@ -107,7 +108,9 @@ type ChatMessage = {
 type ThemeMode = 'light' | 'dark'
 type ResponseStyle = 'balanced' | 'concise' | 'detailed'
 type PromptPurpose = 'general' | 'coding' | 'business' | 'study' | 'writing'
-type AIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart'
+type TextAIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart'
+type ComposerModel = TextAIModel | 'image'
+type AIModel = ComposerModel | 'blimp'
 type VoiceLanguage = 'en-US' | 'en-GB'
 type GenerationOptions = {
   isRegenerate?: boolean
@@ -128,12 +131,26 @@ type ShareDialogData = {
   createdAt: string
 }
 
+type GalleryImageItem = {
+  messageId: string
+  conversationId: string
+  conversationTitle: string
+  src: string
+  prompt: string
+  createdAt: string
+}
+
 const API_BASE =
   ((import.meta.env.VITE_API_BASE_URL as string | undefined) ||
     'https://valtry-llama3-2-3b-quantized.hf.space').replace(/\/+$/, '')
+const IMAGE_GEN_API_BASE =
+  ((import.meta.env.VITE_IMAGE_GEN_API_BASE_URL as string | undefined) ||
+    'https://valtry-llama-img-gen.hf.space').replace(/\/+$/, '')
 const STOP_API = `${API_BASE}/v1/stop`
+const IMAGE_GEN_STOP_API = `${IMAGE_GEN_API_BASE}/v1/stop`
 const IMAGE_STREAM_API = `${API_BASE}/v1/chat/image/stream`
-const MODEL_ENDPOINTS: Record<AIModel, string> = {
+const IMAGE_GENERATE_API = `${IMAGE_GEN_API_BASE}/generate`
+const MODEL_ENDPOINTS: Record<TextAIModel, string> = {
   llama: '/v1/chat/llama',
   qwen: '/v1/chat/qwen',
   coder: '/v1/chat/coder',
@@ -146,12 +163,29 @@ const MODEL_ENGINE_LABELS: Record<AIModel, string> = {
   coder: 'Coder',
   mini: 'Mini',
   smart: 'Smart',
+  image: 'SD-Turbo',
+  blimp: 'Blip',
 }
 
-const COMPOSER_MODEL_OPTIONS: AIModel[] = ['llama', 'coder']
+const COMPOSER_MODEL_LABELS: Record<ComposerModel, string> = {
+  llama: 'Llama',
+  qwen: 'Qwen',
+  coder: 'Coder',
+  mini: 'Mini',
+  smart: 'Smart',
+  image: 'Image',
+}
+
+const COMPOSER_MODEL_OPTIONS: ComposerModel[] = ['llama', 'coder', 'image']
 
 const isAIModel = (value: unknown): value is AIModel =>
+  typeof value === 'string' && value in MODEL_ENGINE_LABELS
+
+const isTextAIModel = (value: unknown): value is TextAIModel =>
   typeof value === 'string' && value in MODEL_ENDPOINTS
+
+const isComposerModel = (value: unknown): value is ComposerModel =>
+  value === 'image' || isTextAIModel(value)
 
 const getMessageModel = (message: ChatMessage): AIModel | null => {
   const candidate = message.model ?? message.model_used
@@ -617,11 +651,17 @@ const supabase =
     : null
 
 function safeId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`
+  const uuid =
+    globalThis.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  return `${prefix}-${uuid}`
 }
 
 function createShareToken() {
-  return crypto.randomUUID().replace(/-/g, '')
+  const uuid =
+    globalThis.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}`
+  return uuid.replace(/-/g, '')
 }
 
 function cleanAssistantOutput(raw: string) {
@@ -653,13 +693,80 @@ function cleanAssistantOutput(raw: string) {
   return cleaned
 }
 
+type ParsedMessageContent = {
+  text: string
+  imageDataUrl?: string
+  imagePrompt: string
+  hasLegacyImageTag: boolean
+}
+
+function tryParseMessagePayload(content: string) {
+  const raw = content.trim()
+  if (!raw || !raw.startsWith('{')) return null
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function toDataUrlFromBase64(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  if (trimmed.startsWith('data:')) return trimmed
+  return `data:image/png;base64,${trimmed}`
+}
+
+function parseMessageContent(content: string): ParsedMessageContent {
+  const payload = tryParseMessagePayload(content)
+  const payloadType =
+    payload && typeof payload.type === 'string' ? payload.type.toLowerCase() : null
+
+  if (payloadType === 'text' && typeof payload?.data === 'string') {
+    const text = payload.data
+    return {
+      text,
+      imagePrompt: text.trim(),
+      hasLegacyImageTag: false,
+    }
+  }
+
+  if (payloadType === 'image' && typeof payload?.data === 'string') {
+    const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : ''
+    return {
+      text: prompt || 'Image sent',
+      imageDataUrl: toDataUrlFromBase64(payload.data),
+      imagePrompt: prompt,
+      hasLegacyImageTag: false,
+    }
+  }
+
+  const stripped = content.replace(/\[Image:\s*[^\]]+\]/gi, '').trim()
+  const hasLegacyImageTag = /\[Image:\s*[^\]]+\]/i.test(content)
+  return {
+    text: stripped || (hasLegacyImageTag ? 'Image sent' : content),
+    imagePrompt: stripped,
+    hasLegacyImageTag,
+  }
+}
+
+function normalizeFetchedMessages(rows: ChatMessage[]) {
+  return rows.map((message) => ({
+    ...message,
+    content: typeof message.content === 'string' ? message.content : String(message.content || ''),
+  }))
+}
+
 function getImageTagValue(content: string) {
   const match = content.match(/\[Image:\s*([^\]]+)\]/i)
   return match?.[1]?.trim().toLowerCase() || null
 }
 
 function getPromptSignatureValue(content: string) {
-  return content.replace(/\[Image:\s*[^\]]+\]/gi, '').trim().toLowerCase()
+  return parseMessageContent(content).imagePrompt.toLowerCase()
 }
 
 function mapImageDataToFetchedMessageIds(
@@ -1012,6 +1119,38 @@ async function streamImageCompletion(
       break
     }
   }
+}
+
+async function generateImageFromPrompt(
+  apiUrl: string,
+  payload: {
+    user_id: string
+    conversation_id: string
+    prompt: string
+  },
+  signal: AbortSignal,
+) {
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal,
+  })
+
+  if (!response.ok) {
+    const details = `HTTP ${response.status} ${response.statusText}`.trim()
+    throw new Error(`Could not generate image (${details}) from ${apiUrl}.`)
+  }
+
+  const parsed = (await response.json()) as { image?: string; data?: string }
+  const base64 = typeof parsed.image === 'string' ? parsed.image : parsed.data
+  if (!base64) {
+    throw new Error('Image generation completed without image data.')
+  }
+
+  return base64
 }
 
 function CopyableCodeBlock({
@@ -1780,20 +1919,44 @@ function LandingPage({ session }: LandingPageProps) {
   )
 }
 
+function ImageGenerationPlaceholder({
+  status,
+}: {
+  status: 'creating' | 'created'
+}) {
+  const isCreated = status === 'created'
+
+  return (
+    <div className={`image-gen-card ${isCreated ? 'is-created' : ''}`}>
+      <div className="image-gen-head">
+        <p className="image-gen-title">{isCreated ? 'Created' : 'Creating image'}</p>
+      </div>
+      <div className="image-gen-stage" aria-hidden="true">
+        <div className="image-gen-canvas" />
+        <div className="image-gen-dotfield" />
+        <div className="image-gen-light-sweep" />
+        <div className="image-gen-vignette" />
+      </div>
+    </div>
+  )
+}
+
 type ChatWorkspaceProps = {
   conversations: Conversation[]
   activeConversationId: string | null
+  isLoadingConversation: boolean
   activeConversationModel: AIModel
   activeMessages: ChatMessage[]
   scrollAnchorMessageId: string | null
   promptCards: string[]
   draft: string
-  selectedModel: AIModel
+  selectedModel: ComposerModel
   enterToSend: boolean
   readAfterSend: boolean
   voiceLanguage: VoiceLanguage
   readVoiceUri: string
   isAnalyzingImage: boolean
+  imageCreateStatus: 'creating' | 'created' | null
   isGenerating: boolean
   generatingConversationId: string | null
   error: string
@@ -1802,7 +1965,7 @@ type ChatWorkspaceProps = {
   sidebarOpen: boolean
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   setDraft: React.Dispatch<React.SetStateAction<string>>
-  setSelectedModel: React.Dispatch<React.SetStateAction<AIModel>>
+  setSelectedModel: React.Dispatch<React.SetStateAction<ComposerModel>>
   onSendOrStop: (
     input: string,
     imageFile?: File | null,
@@ -1816,7 +1979,7 @@ type ChatWorkspaceProps = {
     options?: GenerationOptions,
   ) => Promise<void>
   onNewChat: () => Promise<void>
-  onShareMessage: (content: string) => Promise<void>
+  onShareMessage: (content: string, imageSrc?: string) => Promise<void>
   onShareConversation: (conversationId: string) => Promise<void>
   onDeleteConversationRequest: (conversationId: string) => void
   onConfirmDeleteConversation: () => Promise<void>
@@ -1831,6 +1994,7 @@ type ChatWorkspaceProps = {
 function ChatWorkspace({
   conversations,
   activeConversationId,
+  isLoadingConversation,
   activeConversationModel,
   activeMessages,
   scrollAnchorMessageId,
@@ -1842,6 +2006,7 @@ function ChatWorkspace({
   voiceLanguage,
   readVoiceUri,
   isAnalyzingImage,
+  imageCreateStatus,
   isGenerating,
   generatingConversationId,
   error,
@@ -1868,7 +2033,7 @@ function ChatWorkspace({
   const navigate = useNavigate()
   const visibleMessages = useMemo(() => {
     const normalizePrompt = (value: string) =>
-      value.replace(/\[Image:\s*[^\]]+\]/gi, '').replace(/\s+/g, ' ').trim().toLowerCase()
+      parseMessageContent(value).imagePrompt.replace(/\s+/g, ' ').trim().toLowerCase()
 
     return activeMessages.reduce<ChatMessage[]>((accumulator, message) => {
       const previous = accumulator[accumulator.length - 1]
@@ -1895,6 +2060,8 @@ function ChatWorkspace({
   const voiceBaseDraftRef = useRef('')
   const voiceFinalTranscriptRef = useRef('')
   const lastVoiceTapAtRef = useRef(0)
+  const lastSendTapAtRef = useRef(0)
+  const [pinPromptDuringGeneration, setPinPromptDuringGeneration] = useState(false)
   const keepVoiceListeningRef = useRef(false)
   const voiceRestartTimerRef = useRef<number | null>(null)
   const maxComposerHeight = 180
@@ -2154,7 +2321,7 @@ function ChatWorkspace({
     }, 140)
   }
 
-  const smoothScrollToBottom = (durationMs = 220) => {
+  const smoothScrollToPosition = (targetTop: number, durationMs = 220) => {
     const container = messageScrollRef.current
     if (!container) return
 
@@ -2164,10 +2331,9 @@ function ChatWorkspace({
     }
 
     const startTop = container.scrollTop
-    const targetTop = container.scrollHeight - container.clientHeight
     const distance = targetTop - startTop
 
-    if (distance <= 0) return
+    if (Math.abs(distance) <= 1) return
 
     const startTime = performance.now()
     const easeInOutCubic = (t: number) =>
@@ -2187,6 +2353,14 @@ function ChatWorkspace({
     }
 
     scrollAnimationFrameRef.current = window.requestAnimationFrame(step)
+  }
+
+  const smoothScrollToBottom = (durationMs = 220) => {
+    const container = messageScrollRef.current
+    if (!container) return
+
+    const targetTop = container.scrollHeight - container.clientHeight
+    smoothScrollToPosition(targetTop, durationMs)
   }
 
   const updateScrollToLatestVisibility = () => {
@@ -2245,7 +2419,7 @@ function ChatWorkspace({
       const containerRect = container.getBoundingClientRect()
       const targetRect = target.getBoundingClientRect()
       const nextTop = container.scrollTop + (targetRect.top - containerRect.top) - 12
-      container.scrollTop = Math.max(0, nextTop)
+      smoothScrollToPosition(Math.max(0, nextTop), 560)
       anchorAppliedRef.current = true
       lastAnchoredMessageIdRef.current = scrollAnchorMessageId
     })
@@ -2254,6 +2428,7 @@ function ChatWorkspace({
   useEffect(() => {
     if (!anchorAppliedRef.current) return
     if (!isGenerating || activeConversationId !== generatingConversationId) return
+    if (pinPromptDuringGeneration) return
 
     const assistantHasContent = visibleMessages.some(
       (message) => message.role === 'assistant' && message.content.trim().length > 0,
@@ -2262,9 +2437,15 @@ function ChatWorkspace({
     if (!assistantHasContent) return
 
     requestAnimationFrame(() => {
-      smoothScrollToBottom(320)
+      smoothScrollToBottom(520)
     })
-  }, [activeConversationId, generatingConversationId, isGenerating, visibleMessages])
+  }, [
+    activeConversationId,
+    generatingConversationId,
+    isGenerating,
+    pinPromptDuringGeneration,
+    visibleMessages,
+  ])
 
   useEffect(() => {
     if (!activeConversationId) return
@@ -2273,7 +2454,7 @@ function ChatWorkspace({
     if (isGenerating && activeConversationId === generatingConversationId) return
 
     requestAnimationFrame(() => {
-      smoothScrollToBottom(380)
+      smoothScrollToBottom(620)
     })
   }, [
     activeConversationId,
@@ -2539,6 +2720,10 @@ function ChatWorkspace({
     const justFinishedGenerating = previousIsGeneratingRef.current && !isGenerating
     previousIsGeneratingRef.current = isGenerating
 
+    if (justFinishedGenerating) {
+      setPinPromptDuringGeneration(false)
+    }
+
     if (!readAfterSend) {
       if (liveReadMessageIdRef.current) {
         stopReadAloud()
@@ -2552,12 +2737,15 @@ function ChatWorkspace({
 
     if (!latestAssistantMessage) return
 
+    const latestAssistantParsed = parseMessageContent(latestAssistantMessage.content)
+    if (latestAssistantParsed.imageDataUrl) return
+
     const isLiveReadingActive = liveReadMessageIdRef.current !== null
     if (!isLiveReadingActive) {
       // Only start auto-reading while current response is actively streaming.
       if (!isGenerating) return
       // While model is still "thinking" current assistant content is empty; do not read previous reply.
-      if (latestAssistantMessage.content.trim().length === 0) return
+      if (latestAssistantParsed.text.trim().length === 0) return
     }
 
     // Avoid replaying the same message after stream-end refreshes.
@@ -2571,7 +2759,7 @@ function ChatWorkspace({
 
     if (liveReadMessageIdRef.current !== latestAssistantMessage.id) {
       if (liveReadMessageIdRef.current === null) {
-        if (latestAssistantMessage.content.trim().length === 0) return
+        if (latestAssistantParsed.text.trim().length === 0) return
         liveReadMessageIdRef.current = latestAssistantMessage.id
         liveReadLastLengthRef.current = 0
         liveReadPendingTextRef.current = ''
@@ -2649,9 +2837,19 @@ function ChatWorkspace({
     setTimeout(() => setCopiedMessageId(null), 2000)
   }
 
+  const handleDownloadAssistantImage = (imageSrc?: string) => {
+    if (!imageSrc) return
+    const link = document.createElement('a')
+    link.href = imageSrc
+    link.download = `SD-Turbo-${Date.now()}.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
   const handleRegenerateMessage = async (
     messageId: string,
-    messageModel: AIModel,
+    messageModel: AIModel | null,
     messageContent: string,
     messageCreatedAt: string,
   ) => {
@@ -2660,15 +2858,22 @@ function ChatWorkspace({
     const messageIndex = activeMessages.findIndex((message) => message.id === messageId)
     if (messageIndex <= 0) return
 
+    const targetMessage = activeMessages[messageIndex]
+    const targetParsedContent = parseMessageContent(targetMessage?.content || '')
+    const regenerateModel: AIModel =
+      getMessageModel(targetMessage) ||
+      (targetParsedContent.imageDataUrl ? 'image' : messageModel || 'llama')
+
     const promptImageCursor: Record<string, number> = {}
 
     for (let index = messageIndex - 1; index >= 0; index -= 1) {
       const candidate = activeMessages[index]
       if (candidate?.role !== 'user') continue
 
-      const promptText = candidate.content.replace(/\[Image:\s*[^\]]+\]/g, '').trim()
+      const parsedCandidate = parseMessageContent(candidate.content)
+      const promptText = parsedCandidate.imagePrompt
       const regeneratePrompt =
-        promptText || (candidate.content.includes('[Image:') ? 'Analyze this image' : '')
+        promptText || (parsedCandidate.imageDataUrl || parsedCandidate.hasLegacyImageTag ? 'Analyze this image' : '')
 
       if (!regeneratePrompt) return
 
@@ -2681,6 +2886,7 @@ function ChatWorkspace({
         promptImageCursor,
       )
       const userImageSrc =
+        parsedCandidate.imageDataUrl ||
         imageDataMap[candidate.id] ||
         (imageTagKey ? imageTagDataMap[imageTagKey] : undefined) ||
         promptSignatureImage
@@ -2699,7 +2905,7 @@ function ChatWorkspace({
         replaceAssistantMessageId: messageId,
         replaceAssistantCreatedAt: messageCreatedAt,
         replaceAssistantContent: messageContent,
-        overrideModel: messageModel,
+        overrideModel: regenerateModel,
         anchorMessageId: candidate.id,
         originalPromptMessageId: candidate.id,
         regeneratePromptContent: candidate.content,
@@ -2716,14 +2922,34 @@ function ChatWorkspace({
       return
     }
 
+    if (isStopState) {
+      setPinPromptDuringGeneration(false)
+      void onSendOrStop(draft, selectedImageFile, previewImageUrl)
+      return
+    }
+
     const imageFile = selectedImageFile
     const imageUrl = previewImageUrl
-    void onSendOrStop(draft, imageFile, imageUrl)
+    const draftSnapshot = composerTextareaRef.current?.value ?? draft
+    const hasSendableInput = Boolean(draftSnapshot.trim() || imageFile)
+    if (!hasSendableInput) return
 
-    // When a message with image is submitted, clear the composer preview card.
-    if (!isStopState && imageFile) {
+    const now = Date.now()
+    if (now - lastSendTapAtRef.current < 220) {
+      return
+    }
+    lastSendTapAtRef.current = now
+
+    setPinPromptDuringGeneration(true)
+
+    // Clear immediately so mobile users get instant feedback that tap worked.
+    setDraft('')
+    if (imageFile) {
       clearSelectedImage()
     }
+
+    void onSendOrStop(draftSnapshot, imageFile, imageUrl)
+
   }
 
   const groupedConversations = useMemo(() => {
@@ -2848,10 +3074,16 @@ function ChatWorkspace({
           </div>
         </div>
 
-        <button className="sidebar-settings" onClick={() => navigate('/dashboard')}>
-          <LayoutDashboard size={16} />
-          Dashboard
-        </button>
+        <div className="sidebar-quick-links">
+          <button className="sidebar-settings" onClick={() => navigate('/dashboard')}>
+            <LayoutDashboard size={16} />
+            Dashboard
+          </button>
+          <button className="sidebar-gallery" onClick={() => navigate('/gallery')}>
+            <Images size={16} />
+            Gallery
+          </button>
+        </div>
       </aside>
 
       <div className="chat-pane">
@@ -2941,7 +3173,21 @@ function ChatWorkspace({
         )}
 
         <main ref={messageScrollRef} className="message-scroll">
-          {visibleMessages.length === 0 ? (
+          {isLoadingConversation ? (
+            <section className="chat-loading-state" role="status" aria-live="polite">
+              <div className="premium-chat-loader" aria-hidden="true">
+                <span className="premium-loader-ring premium-loader-ring-outer" />
+                <span className="premium-loader-ring premium-loader-ring-inner" />
+                <img
+                  className="premium-loader-logo"
+                  src="/llama_logo_transparent.png"
+                  alt=""
+                />
+              </div>
+              <p className="chat-loading-title">Opening conversation</p>
+              <p className="chat-loading-subtitle">Pulling your messages from the cloud...</p>
+            </section>
+          ) : visibleMessages.length === 0 ? (
             <section className="empty-state">
               <img
                 className="chat-empty-logo"
@@ -2969,70 +3215,110 @@ function ChatWorkspace({
               </div>
             </section>
           ) : (
-            <div className="message-list">
+            <div className={`message-list ${pinPromptDuringGeneration && isGenerating && activeConversationId === generatingConversationId ? 'prompt-pin-active' : ''}`}>
               {(() => {
                 const promptImageCursor: Record<string, number> = {}
                 return visibleMessages.map((message, index) => {
-                const isPendingAssistant =
-                  message.role === 'assistant' &&
-                  !message.content.trim() &&
-                  isGenerating &&
-                  index === visibleMessages.length - 1
-                const userImageTagMatch =
-                  message.role === 'user'
-                    ? message.content.match(/\[Image:\s*([^\]]+)\]/)
+                  const parsedContent = parseMessageContent(message.content)
+                  const isPendingAssistant =
+                    message.role === 'assistant' &&
+                    !message.content.trim() &&
+                    isGenerating &&
+                    index === visibleMessages.length - 1
+                  const userImageTagMatch =
+                    message.role === 'user'
+                      ? message.content.match(/\[Image:\s*([^\]]+)\]/)
+                      : null
+                  const imageTag = userImageTagMatch?.[1]?.trim().toLowerCase()
+                  const imageTagKey = imageTag
+                    ? `${message.conversation_id}::${imageTag}`
                     : null
-                const imageTag = userImageTagMatch?.[1]?.trim().toLowerCase()
-                const imageTagKey = imageTag
-                  ? `${message.conversation_id}::${imageTag}`
-                  : null
-                const promptSignatureImage =
-                  message.role === 'user'
-                    ? resolveImageFromPromptSignature(
-                        message,
-                        imagePromptDataMap,
-                        promptImageCursor,
-                      )
-                    : undefined
-                const userImageSrc =
-                  (message.role === 'user' && imageDataMap[message.id]) ||
-                  (imageTagKey ? imageTagDataMap[imageTagKey] : undefined) ||
-                  promptSignatureImage
-                const hasUserImage = Boolean(userImageSrc)
-                const userPromptText =
-                  message.role === 'user'
-                    ? message.content.replace(/\[Image:\s*[^\]]+\]/g, '').trim()
-                    : ''
-                const messageModel =
-                  message.role === 'assistant'
-                    ? getMessageModel(message) || activeConversationModel
-                    : null
+                  const promptSignatureImage =
+                    message.role === 'user'
+                      ? resolveImageFromPromptSignature(
+                          message,
+                          imagePromptDataMap,
+                          promptImageCursor,
+                        )
+                      : undefined
+                  const userImageSrc =
+                    (message.role === 'user' && parsedContent.imageDataUrl) ||
+                    (message.role === 'user' && imageDataMap[message.id]) ||
+                    (imageTagKey ? imageTagDataMap[imageTagKey] : undefined) ||
+                    promptSignatureImage
+                  const hasUserImage = Boolean(userImageSrc)
+                  const userPromptText =
+                    message.role === 'user'
+                      ? parsedContent.imagePrompt
+                      : ''
+                  const assistantDisplayContent =
+                    message.role === 'assistant' ? parsedContent.text : ''
+                  const assistantImageSrc =
+                    message.role === 'assistant' ? parsedContent.imageDataUrl : undefined
+                  const hasAssistantImage = Boolean(assistantImageSrc)
+                  const messageModel =
+                    message.role === 'assistant'
+                      ? getMessageModel(message) || activeConversationModel
+                      : null
+                  const pendingStatusText =
+                    imageCreateStatus === 'created'
+                      ? 'Created'
+                      : imageCreateStatus === 'creating'
+                      ? 'Creating image...'
+                      : isAnalyzingImage
+                      ? 'Analyzing image...'
+                      : 'Thinking...'
+                  const isImageGenerationPending =
+                    isPendingAssistant &&
+                    (imageCreateStatus === 'creating' || imageCreateStatus === 'created')
+                  const messageModelLabel =
+                    message.role === 'assistant' && hasAssistantImage
+                      ? 'SD-Turbo'
+                      : MODEL_ENGINE_LABELS[messageModel || activeConversationModel]
 
-                return (
-                  <article
-                    key={message.id}
-                    id={`message-${message.id}`}
-                    className={`message-row ${
-                      message.role === 'user' ? 'user-row' : 'assistant-row'
-                    }`}
-                  >
-                    {message.role === 'assistant' ? (
-                      <div className="assistant-bubble-wrap">
-                        <img
-                          className="assistant-message-logo"
-                          src="/llama_logo_transparent.png"
-                          alt="Llama AI"
-                        />
-                        <div className="bubble assistant">
-                          {isPendingAssistant ? (
-                            <div className="thinking-inline">
-                              <span className="thinking-dot"></span>
-                              <span className="thinking-dot"></span>
-                              <span className="thinking-dot"></span>
-                              <p>{isAnalyzingImage ? 'Analyzing image...' : 'Thinking...'}</p>
-                            </div>
-                          ) : (
-                            <>
+                  return (
+                    <article
+                      key={message.id}
+                      id={`message-${message.id}`}
+                      className={`message-row ${
+                        message.role === 'user' ? 'user-row' : 'assistant-row'
+                      }`}
+                    >
+                      {message.role === 'assistant' ? (
+                        <div className="assistant-bubble-wrap">
+                          <img
+                            className="assistant-message-logo"
+                            src="/llama_logo_transparent.png"
+                            alt="Llama AI"
+                          />
+                          <div className={`bubble assistant ${hasAssistantImage || isImageGenerationPending ? 'with-image' : ''}`}>
+                            {isPendingAssistant ? (
+                              isImageGenerationPending ? (
+                                <ImageGenerationPlaceholder
+                                  status={imageCreateStatus === 'created' ? 'created' : 'creating'}
+                                />
+                              ) : (
+                                <div className="thinking-inline">
+                                  <span className="thinking-dot"></span>
+                                  <span className="thinking-dot"></span>
+                                  <span className="thinking-dot"></span>
+                                  <p>{pendingStatusText}</p>
+                                </div>
+                              )
+                            ) : hasAssistantImage ? (
+                              <div className="message-image-card assistant-generated-image-card">
+                                <img
+                                  src={assistantImageSrc}
+                                  alt={parsedContent.imagePrompt || 'Generated image'}
+                                  className="message-image assistant-generated-image"
+                                  onClick={() => {
+                                    if (!assistantImageSrc) return
+                                    setPreviewImageUrl(assistantImageSrc)
+                                    setShowImageModal(true)
+                                  }}
+                                />
+                              </div>
+                            ) : (
                               <ReactMarkdown
                                 remarkPlugins={[remarkGfm]}
                                 components={{
@@ -3062,42 +3348,38 @@ function ChatWorkspace({
                                   },
                                 }}
                               >
-                                {cleanAssistantOutput(message.content)}
+                                {cleanAssistantOutput(assistantDisplayContent)}
                               </ReactMarkdown>
-                            </>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className={`bubble ${message.role} ${
+                            message.role === 'user' && hasUserImage ? 'with-image' : ''
+                          }`}
+                        >
+                          {hasUserImage ? (
+                            <div className="message-image-card">
+                              <img
+                                src={userImageSrc}
+                                alt="Uploaded image"
+                                className="message-image"
+                                onClick={() => {
+                                  if (!userImageSrc) return
+                                  setPreviewImageUrl(userImageSrc)
+                                  setShowImageModal(true)
+                                }}
+                              />
+                              {userPromptText && (
+                                <p className="message-image-caption">{userPromptText}</p>
+                              )}
+                            </div>
+                          ) : (
+                            <p>{parsedContent.text}</p>
                           )}
                         </div>
-                      </div>
-                    ) : (
-                    <div
-                      className={`bubble ${message.role} ${
-                        message.role === 'user' && hasUserImage ? 'with-image' : ''
-                      }`}
-                    >
-                      {message.role === 'user' && hasUserImage && (
-                        <div className="message-image-card">
-                          <img
-                            src={userImageSrc}
-                            alt="Uploaded image"
-                            className="message-image"
-                            onClick={() => {
-                              if (!userImageSrc) return
-                              setPreviewImageUrl(userImageSrc)
-                              setShowImageModal(true)
-                            }}
-                          />
-                          {userPromptText && <p className="message-image-caption">{userPromptText}</p>}
-                        </div>
                       )}
-                      {!hasUserImage && (
-                        <p>
-                          {message.content
-                            .replace(/\[Image:\s*[^\]]+\]/g, '')
-                            .trim() || (message.content.includes('[Image:') ? 'Image sent' : message.content)}
-                        </p>
-                      )}
-                    </div>
-                    )}
                     {!isPendingAssistant && message.role === 'assistant' && (
                       <div className="message-actions message-actions-outside">
                         <button
@@ -3106,7 +3388,7 @@ function ChatWorkspace({
                           onClick={() =>
                             void handleRegenerateMessage(
                               message.id,
-                              messageModel || activeConversationModel,
+                              getMessageModel(message),
                               message.content,
                               message.created_at,
                             )
@@ -3116,32 +3398,62 @@ function ChatWorkspace({
                         >
                           <RotateCcw size={16} />
                         </button>
-                        <button
-                          type="button"
-                          className={`ghost-button action-btn message-action-icon ${copiedMessageId === message.id ? 'copied' : ''}`}
-                          onClick={() => handleCopyMessage(message.id, message.content)}
-                          title={copiedMessageId === message.id ? 'Copied' : 'Copy'}
-                          aria-label={copiedMessageId === message.id ? 'Copied' : 'Copy'}
-                        >
-                          {copiedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
-                        </button>
-                        <button
-                          type="button"
-                          className={`ghost-button action-btn message-action-icon ${readingMessageId === message.id ? 'reading' : ''}`}
-                          onClick={() => handleReadAloud(message.id, message.content)}
-                          title={readingMessageId === message.id ? 'Reading...' : 'Read aloud'}
-                          aria-label={readingMessageId === message.id ? 'Reading' : 'Read aloud'}
-                        >
-                          {readingMessageId === message.id ? (
-                            <Loader2 size={16} className="action-icon-spin" />
-                          ) : (
-                            <Volume2 size={16} />
-                          )}
-                        </button>
+                        {!hasAssistantImage && (
+                          <button
+                            type="button"
+                            className={`ghost-button action-btn message-action-icon ${copiedMessageId === message.id ? 'copied' : ''}`}
+                            onClick={() =>
+                              handleCopyMessage(
+                                message.id,
+                                message.role === 'assistant'
+                                  ? assistantDisplayContent
+                                  : parsedContent.text,
+                              )
+                            }
+                            title={copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                            aria-label={copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                          >
+                            {copiedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
+                          </button>
+                        )}
+                        {hasAssistantImage ? (
+                          <button
+                            type="button"
+                            className="ghost-button action-btn message-action-icon"
+                            onClick={() =>
+                              handleDownloadAssistantImage(assistantImageSrc)
+                            }
+                            title="Download image"
+                            aria-label="Download image"
+                          >
+                            <Download size={16} />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`ghost-button action-btn message-action-icon ${readingMessageId === message.id ? 'reading' : ''}`}
+                            onClick={() => handleReadAloud(message.id, assistantDisplayContent)}
+                            title={readingMessageId === message.id ? 'Reading...' : 'Read aloud'}
+                            aria-label={readingMessageId === message.id ? 'Reading' : 'Read aloud'}
+                          >
+                            {readingMessageId === message.id ? (
+                              <Loader2 size={16} className="action-icon-spin" />
+                            ) : (
+                              <Volume2 size={16} />
+                            )}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="ghost-button action-btn message-action-icon"
-                          onClick={() => void onShareMessage(message.content)}
+                          onClick={() =>
+                            void onShareMessage(
+                              message.role === 'assistant'
+                                ? assistantDisplayContent
+                                : parsedContent.text,
+                              hasAssistantImage ? assistantImageSrc : undefined,
+                            )
+                          }
                           title="Share"
                           aria-label="Share"
                         >
@@ -3149,14 +3461,19 @@ function ChatWorkspace({
                         </button>
                         <span className="message-model-pill" title="Model used">
                           <Cpu size={16} />
-                          {MODEL_ENGINE_LABELS[messageModel || activeConversationModel]}
+                          {messageModelLabel}
                         </span>
                       </div>
                     )}
-                  </article>
-                )
-              })
+                    </article>
+                  )
+                })
               })()}
+              {pinPromptDuringGeneration &&
+                isGenerating &&
+                activeConversationId === generatingConversationId && (
+                  <div className="prompt-pin-spacer" aria-hidden="true" />
+                )}
             </div>
           )}
           {showScrollToLatest && (
@@ -3165,7 +3482,7 @@ function ChatWorkspace({
               className="scroll-to-latest-button"
               onClick={() => {
                 setShowScrollToLatest(false)
-                smoothScrollToBottom(420)
+                smoothScrollToBottom(700)
               }}
               aria-label="Scroll to latest response"
               title="Scroll to latest"
@@ -3185,7 +3502,7 @@ function ChatWorkspace({
                 value={selectedModel}
                 options={COMPOSER_MODEL_OPTIONS.map((model) => ({
                   value: model,
-                  label: MODEL_ENGINE_LABELS[model],
+                  label: COMPOSER_MODEL_LABELS[model],
                 }))}
                 onChange={setSelectedModel}
                 triggerClassName="composer-select model-select-trigger composer-model-trigger"
@@ -3259,7 +3576,7 @@ function ChatWorkspace({
 
                   if (shouldSend) {
                     event.preventDefault()
-                    handleComposerSendOrStop()
+                    void handleComposerSendOrStop()
                   }
                 }}
               />
@@ -3306,7 +3623,11 @@ function ChatWorkspace({
                   isStopState ? 'stop' : 'send'
                 }`}
                 onClick={() => {
-                  handleComposerSendOrStop()
+                  void handleComposerSendOrStop()
+                }}
+                onTouchEnd={(event) => {
+                  event.preventDefault()
+                  void handleComposerSendOrStop()
                 }}
                 disabled={isGenerating && activeConversationId !== generatingConversationId}
                 aria-label={isStopState ? 'Stop generation' : 'Send message'}
@@ -4109,6 +4430,227 @@ function Dashboard({
   )
 }
 
+function GalleryView({
+  userId,
+  conversations,
+}: {
+  userId: string
+  conversations: Conversation[]
+}) {
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [images, setImages] = useState<GalleryImageItem[]>([])
+  const [previewImage, setPreviewImage] = useState<GalleryImageItem | null>(null)
+
+  const handleDownloadGalleryImage = (imageSrc?: string) => {
+    if (!imageSrc) return
+    const link = document.createElement('a')
+    link.href = imageSrc
+    link.download = `SD-Turbo-${Date.now()}.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const handleShareGalleryImage = async (imageSrc?: string) => {
+    if (!imageSrc) return
+
+    try {
+      const imageResponse = await fetch(imageSrc)
+      const imageBlob = await imageResponse.blob()
+      const imageFile = new File([imageBlob], `SD-Turbo-${Date.now()}.png`, {
+        type: imageBlob.type || 'image/png',
+      })
+
+      const canShareFiles =
+        typeof navigator.canShare === 'function'
+          ? navigator.canShare({ files: [imageFile] })
+          : true
+
+      if (navigator.share && canShareFiles) {
+        await navigator.share({
+          files: [imageFile],
+          title: 'Generated image',
+        })
+        return
+      }
+    } catch {
+      // Fallback to direct download below.
+    }
+
+    handleDownloadGalleryImage(imageSrc)
+  }
+
+  useEffect(() => {
+    if (!supabase) {
+      setError('Gallery unavailable: Supabase is not configured.')
+      setLoading(false)
+      return
+    }
+
+    if (!userId) {
+      setImages([])
+      setLoading(false)
+      return
+    }
+
+    const conversationIds = conversations.map((item) => item.id)
+    if (conversationIds.length === 0) {
+      setImages([])
+      setLoading(false)
+      return
+    }
+
+    const titleMap = new Map(conversations.map((item) => [item.id, item.title]))
+    let active = true
+
+    const loadGalleryImages = async () => {
+      setLoading(true)
+      setError('')
+
+      try {
+        const chunkSize = 100
+        const allRows: ChatMessage[] = []
+
+        for (let index = 0; index < conversationIds.length; index += chunkSize) {
+          const chunk = conversationIds.slice(index, index + chunkSize)
+          const { data, error: loadError } = await supabase
+            .from('messages')
+            .select('*')
+            .in('conversation_id', chunk)
+            .eq('role', 'assistant')
+            .order('created_at', { ascending: false })
+
+          if (loadError) {
+            throw loadError
+          }
+
+          allRows.push(...((data || []) as ChatMessage[]))
+        }
+
+        if (!active) return
+
+        const nextImages = allRows
+          .map((message): GalleryImageItem | null => {
+            const parsed = parseMessageContent(message.content)
+            if (!parsed.imageDataUrl) return null
+
+            return {
+              messageId: message.id,
+              conversationId: message.conversation_id,
+              conversationTitle: titleMap.get(message.conversation_id) || 'Untitled chat',
+              src: parsed.imageDataUrl,
+              prompt: parsed.imagePrompt || 'Generated image',
+              createdAt: message.created_at,
+            }
+          })
+          .filter((item): item is GalleryImageItem => item !== null)
+
+        setImages(nextImages)
+      } catch (loadErr) {
+        setError(loadErr instanceof Error ? loadErr.message : 'Could not load gallery images.')
+      } finally {
+        if (active) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void loadGalleryImages()
+
+    return () => {
+      active = false
+    }
+  }, [conversations, userId])
+
+  return (
+    <div className="dashboard-screen gallery-screen">
+      <div className="dashboard-card gallery-card">
+        <div className="dashv2-head gallery-head">
+          <button
+            type="button"
+            className="dashv2-round"
+            onClick={() => navigate('/chat')}
+            aria-label="Back to chat"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <h2>Image Gallery</h2>
+        </div>
+
+        {loading ? (
+          <section className="chat-loading-state gallery-loading" role="status" aria-live="polite">
+            <div className="premium-chat-loader" aria-hidden="true">
+              <span className="premium-loader-ring premium-loader-ring-outer" />
+              <span className="premium-loader-ring premium-loader-ring-inner" />
+              <img className="premium-loader-logo" src="/llama_logo_transparent.png" alt="" />
+            </div>
+            <p className="chat-loading-title">Collecting generated images</p>
+            <p className="chat-loading-subtitle">Fetching images from your conversations...</p>
+          </section>
+        ) : error ? (
+          <p className="error-text">{error}</p>
+        ) : images.length === 0 ? (
+          <section className="empty-state gallery-empty">
+            <h3>No generated images yet</h3>
+            <p>Use the Image model to create visuals and they will appear here.</p>
+          </section>
+        ) : (
+          <section className="gallery-grid" aria-label="Generated images">
+            {images.map((item) => (
+              <button
+                key={item.messageId}
+                type="button"
+                className="gallery-tile"
+                onClick={() => setPreviewImage(item)}
+              >
+                <img src={item.src} alt={item.prompt} className="gallery-tile-image" />
+              </button>
+            ))}
+          </section>
+        )}
+      </div>
+
+      {previewImage && (
+        <div className="image-modal-overlay gallery-preview-overlay" onClick={() => setPreviewImage(null)}>
+          <div className="image-modal-content gallery-preview-content" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="image-modal-close"
+              onClick={() => setPreviewImage(null)}
+              title="Close image"
+            >
+              <X size={24} />
+            </button>
+            <div className="gallery-preview-media">
+              <img src={previewImage.src} alt={previewImage.prompt} className="image-modal-img gallery-preview-image" />
+              <div className="gallery-preview-actions">
+                <button
+                  type="button"
+                  className="ghost-button gallery-preview-action"
+                  onClick={() => handleDownloadGalleryImage(previewImage.src)}
+                >
+                  <Download size={16} />
+                  Download
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button gallery-preview-action"
+                  onClick={() => void handleShareGalleryImage(previewImage.src)}
+                >
+                  <Share2 size={16} />
+                  Share
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SharedConversationView() {
   const navigate = useNavigate()
   const { shareToken } = useParams<{ shareToken: string }>()
@@ -4121,7 +4663,7 @@ function SharedConversationView() {
 
   const visibleMessages = useMemo(() => {
     const normalized = (value: string) =>
-      value.replace(/\[Image:\s*[^\]]+\]/gi, '').replace(/\s+/g, ' ').trim().toLowerCase()
+      parseMessageContent(value).imagePrompt.replace(/\s+/g, ' ').trim().toLowerCase()
 
     return messages.reduce<ChatMessage[]>((accumulator, message) => {
       const previous = accumulator[accumulator.length - 1]
@@ -4169,6 +4711,45 @@ function SharedConversationView() {
     utterance.onend = () => setReadingSharedMessageId(null)
     utterance.onerror = () => setReadingSharedMessageId(null)
     window.speechSynthesis.speak(utterance)
+  }
+
+  const handleDownloadSharedImage = (imageSrc?: string) => {
+    if (!imageSrc) return
+    const link = document.createElement('a')
+    link.href = imageSrc
+    link.download = `SD-Turbo-${Date.now()}.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const handleShareSharedImage = async (imageSrc?: string) => {
+    if (!imageSrc) return
+
+    try {
+      const imageResponse = await fetch(imageSrc)
+      const imageBlob = await imageResponse.blob()
+      const imageFile = new File([imageBlob], `SD-Turbo-${Date.now()}.png`, {
+        type: imageBlob.type || 'image/png',
+      })
+
+      const canShareFiles =
+        typeof navigator.canShare === 'function'
+          ? navigator.canShare({ files: [imageFile] })
+          : true
+
+      if (navigator.share && canShareFiles) {
+        await navigator.share({
+          files: [imageFile],
+          title: 'SD-Turbo image',
+        })
+        return
+      }
+    } catch {
+      // Fall back to direct download below.
+    }
+
+    handleDownloadSharedImage(imageSrc)
   }
 
   useEffect(() => {
@@ -4236,7 +4817,7 @@ function SharedConversationView() {
         return
       }
 
-      setMessages((sharedMessages || []) as ChatMessage[])
+      setMessages(normalizeFetchedMessages((sharedMessages || []) as ChatMessage[]))
       setLoading(false)
     }
 
@@ -4268,7 +4849,19 @@ function SharedConversationView() {
         </p>
 
         {loading ? (
-          <div className="screen-loader shared-loader">Loading shared conversation...</div>
+          <section className="chat-loading-state shared-loading-state" role="status" aria-live="polite">
+            <div className="premium-chat-loader" aria-hidden="true">
+              <span className="premium-loader-ring premium-loader-ring-outer" />
+              <span className="premium-loader-ring premium-loader-ring-inner" />
+              <img
+                className="premium-loader-logo"
+                src="/llama_logo_transparent.png"
+                alt=""
+              />
+            </div>
+            <p className="chat-loading-title">Opening shared conversation</p>
+            <p className="chat-loading-subtitle">Loading public messages...</p>
+          </section>
         ) : error ? (
           <p className="error-text">{error}</p>
         ) : visibleMessages.length === 0 ? (
@@ -4280,10 +4873,21 @@ function SharedConversationView() {
           <div className="shared-message-scroll">
             <div className="message-list">
               {visibleMessages.map((message) => {
+                const parsedContent = parseMessageContent(message.content)
+                const assistantDisplayContent =
+                  message.role === 'assistant' ? parsedContent.text : ''
+                const assistantImageSrc =
+                  message.role === 'assistant' ? parsedContent.imageDataUrl : undefined
+                const hasAssistantImage = Boolean(assistantImageSrc)
+                const hasUserImage = message.role === 'user' && Boolean(parsedContent.imageDataUrl)
                 const messageModel =
                   message.role === 'assistant'
                     ? getMessageModel(message)
                     : null
+                const messageModelLabel =
+                  message.role === 'assistant' && hasAssistantImage
+                    ? 'SD-Turbo'
+                    : MODEL_ENGINE_LABELS[messageModel || 'llama']
 
                 return (
                   <article
@@ -4297,81 +4901,134 @@ function SharedConversationView() {
                           src="/llama_logo_transparent.png"
                           alt="Llama AI"
                         />
-                        <div className="bubble assistant">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              code: ({ node, className, children, ...props }) => {
-                                const code = String(children)
-                                const language = className?.replace('language-', '')
-                                const meta =
-                                  ((node as { data?: { meta?: string }; meta?: string } | undefined)
-                                    ?.data?.meta ||
-                                    (node as { meta?: string } | undefined)?.meta ||
-                                    '')
-                                const isBlock = Boolean(language) || code.includes('\n')
+                        <div className={`bubble assistant ${hasAssistantImage ? 'with-image' : ''}`}>
+                          {hasAssistantImage ? (
+                            <div className="message-image-card assistant-generated-image-card">
+                              <img
+                                src={assistantImageSrc}
+                                alt={parsedContent.imagePrompt || 'Generated image'}
+                                className="message-image assistant-generated-image"
+                              />
+                            </div>
+                          ) : (
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                code: ({ node, className, children, ...props }) => {
+                                  const code = String(children)
+                                  const language = className?.replace('language-', '')
+                                  const meta =
+                                    ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                                      ?.data?.meta ||
+                                      (node as { meta?: string } | undefined)?.meta ||
+                                      '')
+                                  const isBlock = Boolean(language) || code.includes('\n')
 
-                                if (isBlock) {
+                                  if (isBlock) {
+                                    return (
+                                      <CopyableCodeBlock language={language} meta={meta}>
+                                        {code}
+                                      </CopyableCodeBlock>
+                                    )
+                                  }
+
                                   return (
-                                    <CopyableCodeBlock language={language} meta={meta}>
-                                      {code}
-                                    </CopyableCodeBlock>
+                                    <code className={className} {...props}>
+                                      {children}
+                                    </code>
                                   )
-                                }
-
-                                return (
-                                  <code className={className} {...props}>
-                                    {children}
-                                  </code>
-                                )
-                              },
-                            }}
-                          >
-                            {cleanAssistantOutput(message.content)}
-                          </ReactMarkdown>
+                                },
+                              }}
+                            >
+                              {cleanAssistantOutput(assistantDisplayContent)}
+                            </ReactMarkdown>
+                          )}
                         </div>
                       </div>
                     ) : (
                       <div className="bubble user">
-                        <p>
-                          {message.content
-                            .replace(/\[Image:\s*[^\]]+\]/g, '')
-                            .trim() ||
-                            (message.content.includes('[Image:')
-                              ? 'Image sent'
-                              : message.content)}
-                        </p>
+                        {hasUserImage ? (
+                          <div className="message-image-card">
+                            <img
+                              src={parsedContent.imageDataUrl}
+                              alt="Uploaded image"
+                              className="message-image"
+                            />
+                            {parsedContent.imagePrompt && (
+                              <p className="message-image-caption">{parsedContent.imagePrompt}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p>{parsedContent.text}</p>
+                        )}
                       </div>
                     )}
                     <div className="message-actions message-actions-outside shared-message-actions">
-                      <button
-                        type="button"
-                        className={`ghost-button action-btn message-action-icon ${copiedSharedMessageId === message.id ? 'copied' : ''}`}
-                        onClick={() => handleCopySharedMessage(message.id, message.content)}
-                        title={copiedSharedMessageId === message.id ? 'Copied' : 'Copy'}
-                        aria-label={copiedSharedMessageId === message.id ? 'Copied' : 'Copy'}
-                      >
-                        {copiedSharedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
-                      </button>
-                      {message.role === 'assistant' && (
+                      {!(message.role === 'assistant' && hasAssistantImage) && (
                         <button
                           type="button"
-                          className={`ghost-button action-btn message-action-icon ${readingSharedMessageId === message.id ? 'reading' : ''}`}
-                          onClick={() => handleReadSharedMessage(message.id, message.content)}
-                          title={readingSharedMessageId === message.id ? 'Reading...' : 'Read aloud'}
-                          aria-label={readingSharedMessageId === message.id ? 'Reading' : 'Read aloud'}
+                          className={`ghost-button action-btn message-action-icon ${copiedSharedMessageId === message.id ? 'copied' : ''}`}
+                          onClick={() =>
+                            handleCopySharedMessage(
+                              message.id,
+                              message.role === 'assistant'
+                                ? assistantDisplayContent
+                                : parsedContent.text,
+                            )
+                          }
+                          title={copiedSharedMessageId === message.id ? 'Copied' : 'Copy'}
+                          aria-label={copiedSharedMessageId === message.id ? 'Copied' : 'Copy'}
                         >
-                          {readingSharedMessageId === message.id ? (
-                            <Loader2 size={16} className="action-icon-spin" />
-                          ) : (
-                            <Volume2 size={16} />
-                          )}
+                          {copiedSharedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
                         </button>
                       )}
+                      {message.role === 'assistant' &&
+                        (hasAssistantImage ? (
+                          <>
+                            <button
+                              type="button"
+                              className="ghost-button action-btn message-action-icon"
+                              onClick={() =>
+                                handleDownloadSharedImage(assistantImageSrc)
+                              }
+                              title="Download image"
+                              aria-label="Download image"
+                            >
+                              <Download size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button action-btn message-action-icon"
+                              onClick={() =>
+                                void handleShareSharedImage(assistantImageSrc)
+                              }
+                              title="Share image"
+                              aria-label="Share image"
+                            >
+                              <Share2 size={16} />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`ghost-button action-btn message-action-icon ${readingSharedMessageId === message.id ? 'reading' : ''}`}
+                            onClick={() =>
+                              handleReadSharedMessage(message.id, assistantDisplayContent)
+                            }
+                            title={readingSharedMessageId === message.id ? 'Reading...' : 'Read aloud'}
+                            aria-label={readingSharedMessageId === message.id ? 'Reading' : 'Read aloud'}
+                          >
+                            {readingSharedMessageId === message.id ? (
+                              <Loader2 size={16} className="action-icon-spin" />
+                            ) : (
+                              <Volume2 size={16} />
+                            )}
+                          </button>
+                        ))}
                       {message.role === 'assistant' && (
                         <span className="message-model-pill" title="Model used">
                           <Cpu size={16} />
-                          {MODEL_ENGINE_LABELS[messageModel || 'llama']}
+                          {messageModelLabel}
                         </span>
                       )}
                     </div>
@@ -4395,16 +5052,20 @@ function App() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     null,
   )
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null)
   const [messagesMap, setMessagesMap] = useState<Record<string, ChatMessage[]>>({})
   const [promptPurpose, setPromptPurpose] = useState<PromptPurpose>('general')
   const [promptCards, setPromptCards] = useState<string[]>(() =>
     pickRandomPrompts('general'),
   )
   const [draft, setDraft] = useState('')
-  const [selectedModel, setSelectedModel] = useState<AIModel>('llama')
+  const [selectedModel, setSelectedModel] = useState<ComposerModel>('llama')
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingConversationId, setGeneratingConversationId] = useState<string | null>(null)
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false)
+  const [imageCreateStatus, setImageCreateStatus] = useState<'creating' | 'created' | null>(
+    null,
+  )
   const [, setIsThinking] = useState(false)
   const [, setStreamTick] = useState(0)
   const [error, setError] = useState('')
@@ -4686,25 +5347,34 @@ function App() {
   }, [activeConversationId, messagesMap, selectedModel])
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme-mode') as ThemeMode | null
+    const userId = session?.user?.id
+    const savedTheme = (
+      userId
+        ? localStorage.getItem(`theme-mode:${userId}`) || localStorage.getItem('theme-mode')
+        : localStorage.getItem('theme-mode')
+    ) as ThemeMode | null
+
     if (savedTheme === 'dark' || savedTheme === 'light') {
       setTheme(savedTheme)
     } else {
       setTheme('light')
     }
-  }, [])
+  }, [session?.user?.id])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('theme-mode', theme)
-  }, [theme])
+    if (session?.user?.id) {
+      localStorage.setItem(`theme-mode:${session.user.id}`, theme)
+    }
+  }, [theme, session?.user?.id])
 
   const refreshPromptCards = (purpose = promptPurpose, count = suggestionCount) => {
     setPromptCards(pickRandomPrompts(purpose, count))
   }
 
   useEffect(() => {
-    if (!session?.user) return
+    if (!session?.user?.id) return
 
     const keyPrefix = session.user.id
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
@@ -4752,7 +5422,7 @@ function App() {
     setReadVoiceUri(storedReadVoiceUri || 'default')
     setConfirmClearChats(storedConfirmClear !== 'false')
     setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
-  }, [session?.user])
+  }, [session?.user?.id])
 
   useEffect(() => {
     return () => {
@@ -4818,6 +5488,7 @@ function App() {
     if (!session?.user || !supabase) {
       setConversations([])
       setActiveConversationId(null)
+      setLoadingConversationId(null)
       setMessagesMap({})
       setImageDataMap({})
       setImageTagDataMap({})
@@ -4840,9 +5511,14 @@ function App() {
       const chats = (data || []) as Conversation[]
       setConversations(chats)
 
+      const isNewChatRoute = location.pathname === '/chat/new-chat'
       const fromQuery = new URLSearchParams(window.location.search).get('c')
       if (fromQuery && chats.some((conv) => conv.id === fromQuery)) {
         setActiveConversationId(fromQuery)
+      } else if (isNewChatRoute) {
+        // Keep current selection untouched on the explicit new-chat route.
+        // This avoids clobbering a just-created conversation during the first send.
+        setActiveConversationId((prev) => prev)
       } else {
         setActiveConversationId((prev) => prev || chats[0]?.id || null)
       }
@@ -4853,24 +5529,38 @@ function App() {
 
   useEffect(() => {
     if (!activeConversationId || !supabase) return
-    if (messagesMap[activeConversationId]) return
+    if (messagesMap[activeConversationId]) {
+      setLoadingConversationId((current) =>
+        current === activeConversationId ? null : current,
+      )
+      return
+    }
+
+    const conversationId = activeConversationId
+    setLoadingConversationId(conversationId)
 
     const loadMessages = async () => {
-      const { data, error: loadError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', activeConversationId)
-        .order('created_at', { ascending: true })
+      try {
+        const { data, error: loadError } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: true })
 
-      if (loadError) {
-        setError(loadError.message)
-        return
+        if (loadError) {
+          setError(loadError.message)
+          return
+        }
+
+        setMessagesMap((prev) => ({
+          ...prev,
+          [conversationId]: normalizeFetchedMessages((data || []) as ChatMessage[]),
+        }))
+      } finally {
+        setLoadingConversationId((current) =>
+          current === conversationId ? null : current,
+        )
       }
-
-      setMessagesMap((prev) => ({
-        ...prev,
-        [activeConversationId]: (data || []) as ChatMessage[],
-      }))
     }
 
     void loadMessages()
@@ -4892,7 +5582,7 @@ function App() {
       setError(loadError.message)
       return
     }
-    const fetchedMessages = (data || []) as ChatMessage[]
+    const fetchedMessages = normalizeFetchedMessages((data || []) as ChatMessage[])
     const previousMessages = messagesMap[conversationId] || []
     let skippedUpdate = false
     let needsAssistantRetry = false
@@ -4901,13 +5591,16 @@ function App() {
       const currentMessages = prev[conversationId] || []
 
       if (preserveStreamedMessages) {
+        const currentHasLocalOptimisticMessages = currentMessages.some(
+          (message) => !isUuid(message.id),
+        )
         const currentHasAssistantContent = currentMessages.some(
           (message) =>
-            message.role === 'assistant' && message.content.trim().length > 0,
+            message.role === 'assistant' && parseMessageContent(message.content).text.trim().length > 0,
         )
         const fetchedHasAssistantContent = fetchedMessages.some(
           (message) =>
-            message.role === 'assistant' && message.content.trim().length > 0,
+            message.role === 'assistant' && parseMessageContent(message.content).text.trim().length > 0,
         )
         const fetchedHasAssistantMessage = fetchedMessages.some(
           (message) => message.role === 'assistant',
@@ -4916,6 +5609,15 @@ function App() {
         // Sometimes DB replication briefly returns an empty assistant placeholder.
         if (fetchedHasAssistantMessage && !fetchedHasAssistantContent) {
           needsAssistantRetry = true
+        }
+
+        // Keep optimistic user/assistant rows visible while DB replication catches up.
+        if (
+          currentHasLocalOptimisticMessages &&
+          fetchedMessages.length < currentMessages.length
+        ) {
+          skippedUpdate = true
+          return prev
         }
 
         // Avoid wiping a just-streamed answer when DB replication is a beat behind.
@@ -5004,12 +5706,12 @@ function App() {
     }))
   }
 
-  const createConversation = async () => {
+  const createConversation = async (initialTitle = 'New Chat') => {
     if (!supabase || !session?.user) return null
 
     const payload = {
       user_id: session.user.id,
-      title: 'New Chat',
+      title: initialTitle,
     }
 
     const { data, error: insertError } = await supabase
@@ -5059,9 +5761,9 @@ function App() {
     })
   }
 
-  const ensureConversation = async () => {
+  const ensureConversation = async (initialTitle?: string) => {
     if (activeConversationId) return activeConversationId
-    return createConversation()
+    return createConversation(initialTitle || 'New Chat')
   }
 
   const deleteDuplicateRegeneratePrompt = async (
@@ -5108,15 +5810,24 @@ function App() {
     const replaceAssistantMessageId = options?.replaceAssistantMessageId
     const replaceAssistantCreatedAt = options?.replaceAssistantCreatedAt
     const replaceAssistantContent = options?.replaceAssistantContent
-    const overrideModel = options?.overrideModel ?? selectedModel
+    const requestedModel = options?.overrideModel ?? selectedModel
+    const responseModel: AIModel = imageFile
+      ? 'blimp'
+      : requestedModel === 'image'
+      ? 'image'
+      : isTextAIModel(requestedModel)
+      ? requestedModel
+      : 'llama'
     const anchorMessageId = options?.anchorMessageId
     const originalPromptMessageId = options?.originalPromptMessageId
     const regeneratePromptContent = options?.regeneratePromptContent
 
-    let conversationId = await ensureConversation()
+    const initialConversationTitle = deriveTitle(promptForRequest)
+
+    let conversationId = await ensureConversation(initialConversationTitle)
     if (!conversationId) return
     if (!isUuid(conversationId)) {
-      const recoveredConversationId = await createConversation()
+      const recoveredConversationId = await createConversation(initialConversationTitle)
       if (!recoveredConversationId || !isUuid(recoveredConversationId)) {
         setError('Could not create a valid conversation id.')
         return
@@ -5125,6 +5836,7 @@ function App() {
     }
 
     moveConversationToTop(conversationId)
+    setActiveConversationId(conversationId)
 
     navigate(`/chat/${slugify(promptForRequest)}?c=${conversationId}`)
 
@@ -5239,7 +5951,7 @@ function App() {
       conversation_id: conversationId,
       role: 'assistant',
       content: '',
-      model: overrideModel,
+      model: responseModel,
       created_at: new Date().toISOString(),
     }
 
@@ -5253,6 +5965,7 @@ function App() {
     setIsGenerating(true)
     setGeneratingConversationId(conversationId)
     setIsAnalyzingImage(Boolean(imageFile))
+    setImageCreateStatus(responseModel === 'image' ? 'creating' : null)
     setIsThinking(!imageFile)
 
     setScrollAnchorMessageId(isRegenerate ? anchorMessageId || null : userId)
@@ -5300,8 +6013,46 @@ function App() {
             setIsThinking(false)
           },
         )
+      } else if (responseModel === 'image') {
+        setIsThinking(true)
+        const generatedBase64 = await generateImageFromPrompt(
+          IMAGE_GENERATE_API,
+          {
+            user_id: session.user.id,
+            conversation_id: conversationId,
+            prompt: promptForRequest,
+          },
+          controller.signal,
+        )
+
+        setImageCreateStatus('created')
+        await new Promise<void>((resolve) => {
+          window.setTimeout(() => resolve(), 550)
+        })
+
+        const assistantImagePayload = JSON.stringify({
+          type: 'image',
+          data: generatedBase64,
+          prompt: promptForRequest,
+          model: 'sd-turbo',
+        })
+
+        setMessagesMap((prev) => ({
+          ...prev,
+          [conversationId]: (prev[conversationId] || []).map((message) =>
+            message.id === assistantId
+              ? { ...message, content: assistantImagePayload }
+              : message,
+          ),
+        }))
+        setIsThinking(false)
       } else {
-        const endpoint = MODEL_ENDPOINTS[overrideModel]
+        if (!isTextAIModel(responseModel)) {
+          setError('Invalid text model selected.')
+          return
+        }
+
+        const endpoint = MODEL_ENDPOINTS[responseModel]
         const apiUrl = `${API_BASE}${endpoint}`
         await streamCompletion(
           apiUrl,
@@ -5351,6 +6102,7 @@ function App() {
       setIsGenerating(false)
       setGeneratingConversationId(null)
       setIsAnalyzingImage(false)
+      setImageCreateStatus(null)
       setIsThinking(false)
       abortRef.current = null
       if (isRegenerate && regeneratePromptContent) {
@@ -5361,7 +6113,7 @@ function App() {
         )
       }
       await refreshMessages(conversationId, true)
-      await persistModelForLatestAssistantMessage(conversationId, overrideModel)
+      await persistModelForLatestAssistantMessage(conversationId, responseModel)
     }
   }
 
@@ -5376,11 +6128,20 @@ function App() {
       abortRef.current?.abort()
       try {
         if (conversationId) {
-          await fetch(STOP_API, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversation_id: conversationId }),
-          })
+          const stopTargets =
+            STOP_API === IMAGE_GEN_STOP_API
+              ? [STOP_API]
+              : [STOP_API, IMAGE_GEN_STOP_API]
+
+          await Promise.allSettled(
+            stopTargets.map((target) =>
+              fetch(target, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversation_id: conversationId }),
+              }),
+            ),
+          )
         }
       } catch {
         // Stop endpoint failure should not block local cancellation.
@@ -5490,7 +6251,42 @@ function App() {
     await performClearChats()
   }
 
-  const onShareMessage = async (content: string) => {
+  const onShareMessage = async (content: string, imageSrc?: string) => {
+    if (imageSrc) {
+      const imageResponse = await fetch(imageSrc)
+      const imageBlob = await imageResponse.blob()
+      const imageFile = new File([imageBlob], `SD-Turbo-${Date.now()}.png`, {
+        type: imageBlob.type || 'image/png',
+      })
+
+      if (
+        navigator.share &&
+        (!navigator.canShare || navigator.canShare({ files: [imageFile] }))
+      ) {
+        try {
+          await navigator.share({
+            files: [imageFile],
+            title: 'SD-Turbo image',
+          })
+          showNotice('Image shared.')
+          return
+        } catch {
+          // Fallback to download when file sharing is unavailable or cancelled.
+        }
+      }
+
+      const url = URL.createObjectURL(imageBlob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = imageFile.name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      showNotice('Image downloaded for sharing.')
+      return
+    }
+
     let link = window.location.origin
 
     if (activeConversationId) {
@@ -5538,7 +6334,11 @@ function App() {
         .find((message) => message.role === 'assistant' && getMessageModel(message))
         ?.model_used
     setActiveConversationId(conversationId)
-    if (isAIModel(modelForConversation)) {
+    setScrollAnchorMessageId(null)
+    if (!messagesMap[conversationId]) {
+      setLoadingConversationId(conversationId)
+    }
+    if (isComposerModel(modelForConversation)) {
       setSelectedModel(modelForConversation)
     }
     refreshPromptCards()
@@ -5649,6 +6449,11 @@ function App() {
               <ChatWorkspace
                 conversations={conversations}
                 activeConversationId={activeConversationId}
+                isLoadingConversation={
+                  Boolean(activeConversationId) &&
+                  loadingConversationId === activeConversationId &&
+                  (activeConversationId ? !messagesMap[activeConversationId] : false)
+                }
                 activeConversationModel={activeConversationModel}
                 activeMessages={activeMessages}
                 scrollAnchorMessageId={scrollAnchorMessageId}
@@ -5660,6 +6465,7 @@ function App() {
                 voiceLanguage={voiceLanguage}
                 readVoiceUri={readVoiceUri}
                 isAnalyzingImage={isAnalyzingImage}
+                imageCreateStatus={imageCreateStatus}
                 isGenerating={isGenerating}
                 generatingConversationId={generatingConversationId}
                 error={error}
@@ -5721,6 +6527,18 @@ function App() {
                 onExportChats={onExportChats}
                 onLogout={onLogout}
               />
+            )
+          }
+        />
+        <Route
+          path="/gallery"
+          element={
+            booting ? (
+              <div className="screen-loader">Loading...</div>
+            ) : !session ? (
+              <Navigate to="/auth" replace />
+            ) : (
+              <GalleryView userId={session.user.id} conversations={conversations} />
             )
           }
         />
