@@ -1,4 +1,4 @@
-const CACHE_NAME = 'llama-ai-cache-v2'
+const CACHE_NAME = 'llama-ai-cache-v3'
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/brand_logo_zoom.png']
 
 self.addEventListener('install', (event) => {
@@ -19,6 +19,12 @@ self.addEventListener('activate', (event) => {
     ),
   )
   self.clients.claim()
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
 })
 
 self.addEventListener('fetch', (event) => {
@@ -55,6 +61,9 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(request)
       .then((response) => {
+        if (!response || (!response.ok && response.type !== 'opaque')) {
+          return response
+        }
         const responseClone = response.clone()
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(request, responseClone)
