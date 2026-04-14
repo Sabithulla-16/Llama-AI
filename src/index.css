@@ -774,6 +774,17 @@ textarea {
   border-radius: 28px;
   background:
     linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 86%, var(--brand) 4%),
+      color-mix(in srgb, #fff 92%, transparent)
+    );
+  backdrop-filter: blur(20px);
+  box-shadow:
+    0 26px 52px -30px rgba(18, 39, 71, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  animation: rise 0.35s ease;
+  overflow: hidden;
+}
 
 .auth-wrap.auth-v2 {
   background:
@@ -1071,18 +1082,6 @@ textarea {
     padding: 8px;
     border-radius: 18px;
   }
-}
-
-      180deg,
-      color-mix(in srgb, #fff 86%, var(--brand) 4%),
-      color-mix(in srgb, #fff 92%, transparent)
-    );
-  backdrop-filter: blur(20px);
-  box-shadow:
-    0 26px 52px -30px rgba(18, 39, 71, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  animation: rise 0.35s ease;
-  overflow: hidden;
 }
 
 .auth-layout {
@@ -2591,9 +2590,183 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.code-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .code-body {
   position: relative;
   max-width: 100%;
+}
+
+.code-run-output {
+  background: transparent;
+}
+
+.code-run-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  background: rgba(8, 12, 20, 0.28);
+  backdrop-filter: blur(2px);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.code-run-drawer {
+  width: min(480px, 94vw);
+  height: 100%;
+  background: linear-gradient(180deg, rgba(249, 251, 255, 0.98), rgba(242, 247, 255, 0.98));
+  border-left: 1px solid rgba(103, 130, 176, 0.22);
+  box-shadow: -20px 0 48px -36px rgba(8, 12, 20, 0.45);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  animation: codeDrawerSlideIn 0.22s ease;
+}
+
+.code-run-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(103, 130, 176, 0.2);
+}
+
+.code-run-drawer-head h4 {
+  margin: 0;
+  font-size: 16px;
+  color: #24314a;
+}
+
+.code-run-drawer-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.code-run-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  color: #41537a;
+}
+
+.code-run-output-body {
+  margin: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px 20px;
+  font-size: 13px;
+  line-height: 1.48;
+  color: #2d3a55;
+  background: #f8fbff;
+}
+
+.code-run-input-area {
+  border-top: 1px solid rgba(103, 130, 176, 0.2);
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.code-run-input-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #30405f;
+}
+
+.code-run-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(109, 136, 181, 0.28);
+  background: #ffffff;
+  color: #283552;
+  padding: 8px 10px;
+  min-height: 88px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.code-run-input-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #5d7096;
+}
+
+.code-run-line {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-run-line.stderr {
+  color: #b02a44;
+}
+
+.code-run-line.error {
+  color: #c52525;
+}
+
+.code-run-line.info {
+  color: #4b6598;
+}
+
+@keyframes codeDrawerSlideIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+[data-theme='dark'] .code-run-drawer-overlay {
+  background: rgba(4, 6, 12, 0.45);
+}
+
+[data-theme='dark'] .code-run-drawer {
+  background: linear-gradient(180deg, rgba(16, 19, 26, 0.98), rgba(11, 14, 20, 0.98));
+  border-left-color: rgba(107, 130, 176, 0.24);
+}
+
+[data-theme='dark'] .code-run-drawer-head {
+  border-bottom-color: rgba(107, 130, 176, 0.18);
+}
+
+[data-theme='dark'] .code-run-drawer-head h4 {
+  color: #d8e4ff;
+}
+
+[data-theme='dark'] .code-run-output-body {
+  background: #080d18;
+  color: #d8e4ff;
+}
+
+[data-theme='dark'] .code-run-input-area {
+  border-top-color: rgba(107, 130, 176, 0.18);
+  background: rgba(8, 12, 20, 0.72);
+}
+
+[data-theme='dark'] .code-run-input-label {
+  color: #c7d8f6;
+}
+
+[data-theme='dark'] .code-run-input {
+  border-color: rgba(112, 138, 186, 0.34);
+  background: #0e1526;
+  color: #d8e4ff;
+}
+
+[data-theme='dark'] .code-run-input-hint {
+  color: #8fa8d8;
+}
+
+[data-theme='dark'] .code-run-close {
+  color: #b5c7e5;
 }
 
 .embedded-markdown-code {

@@ -146,6 +146,14 @@ const API_BASE =
 const IMAGE_GEN_API_BASE =
   ((import.meta.env.VITE_IMAGE_GEN_API_BASE_URL as string | undefined) ||
     'https://valtry-llama-img-gen.hf.space').replace(/\/+$/, '')
+const CODE_RUNNER_API =
+  ((import.meta.env.VITE_CODE_RUNNER_STREAM_API as string | undefined) ||
+    'https://code-runner-q5yo.onrender.com')
+    .trim()
+    .replace(/\/+$/, '')
+const CODE_RUNNER_STREAM_API = CODE_RUNNER_API.endsWith('/run/stream')
+  ? CODE_RUNNER_API
+  : `${CODE_RUNNER_API}/run/stream`
 const STOP_API = `${API_BASE}/v1/stop`
 const IMAGE_GEN_STOP_API = `${IMAGE_GEN_API_BASE}/v1/stop`
 const IMAGE_STREAM_API = `${API_BASE}/v1/chat/image/stream`
@@ -1354,11 +1362,38 @@ function CopyableCodeBlock({
     return storedState ?? defaultExpanded
   })
   const [copied, setCopied] = useState(false)
+  const [runOutput, setRunOutput] = useState<
+    Array<{ type: 'stdout' | 'stderr' | 'error' | 'info'; content: string }>
+  >([])
+  const [runState, setRunState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [isRunPanelOpen, setIsRunPanelOpen] = useState(false)
+  const [runInput, setRunInput] = useState('')
+  const runAbortRef = useRef<AbortController | null>(null)
+
+  const runnableLanguage = useMemo(() => {
+    const normalized = (language || '').toLowerCase().trim()
+    if (['py', 'python'].includes(normalized)) return 'python'
+    if (['js', 'javascript'].includes(normalized)) return 'javascript'
+    if (['cpp', 'c++', 'cc', 'cxx'].includes(normalized)) return 'cpp'
+    if (['c'].includes(normalized)) return 'c'
+    if (['java'].includes(normalized)) return 'java'
+    if (['rs', 'rust'].includes(normalized)) return 'rust'
+    if (['go', 'golang'].includes(normalized)) return 'go'
+    if (['bash', 'shell', 'sh', 'zsh'].includes(normalized)) return 'bash'
+    return null
+  }, [language])
 
   useEffect(() => {
     const storedState = CODE_BLOCK_EXPANSION_MEMORY.get(expansionKey)
     setIsExpanded(storedState ?? defaultExpanded)
   }, [expansionKey, defaultExpanded])
+
+  useEffect(() => {
+    return () => {
+      runAbortRef.current?.abort()
+      runAbortRef.current = null
+    }
+  }, [])
 
   const isCollapsible = totalLines > MAX_COLLAPSED_LINES
   const isCollapsed = isCollapsible && !isExpanded
@@ -1386,12 +1421,153 @@ function CopyableCodeBlock({
     URL.revokeObjectURL(url)
   }
 
+  const onRunCode = async () => {
+    if (!runnableLanguage || runState === 'running') return
+
+    const controller = new AbortController()
+    runAbortRef.current = controller
+    setRunOutput([{ type: 'info', content: `Running ${runnableLanguage}...` }])
+    setRunState('running')
+    const normalizedInput = runInput ? (runInput.endsWith('\n') ? runInput : `${runInput}\n`) : ''
+
+    try {
+      const response = await fetch(CODE_RUNNER_STREAM_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({
+          code: textContent,
+          language: runnableLanguage,
+          input: normalizedInput,
+        }),
+        signal: controller.signal,
+      })
+
+      if (!response.ok || !response.body) {
+        const details = `HTTP ${response.status} ${response.statusText}`.trim()
+        throw new Error(`Code runner request failed (${details}).`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let eventName = 'message'
+      let dataLines: string[] = []
+
+      const pushOutput = (entry: { type: 'stdout' | 'stderr' | 'error' | 'info'; content: string }) => {
+        setRunOutput((prev) => [...prev, entry])
+      }
+
+      const dispatchEvent = () => {
+        const payloadText = dataLines.join('\n').trim()
+        dataLines = []
+
+        if (!payloadText) {
+          eventName = 'message'
+          return
+        }
+
+        if (eventName === 'done') {
+          pushOutput({ type: 'info', content: 'Execution finished.' })
+          setRunState('done')
+          eventName = 'message'
+          return
+        }
+
+        try {
+          const parsed = JSON.parse(payloadText) as {
+            type?: 'stdout' | 'stderr'
+            content?: string
+            error?: string
+          }
+
+          if (parsed.error) {
+            pushOutput({ type: 'error', content: parsed.error })
+            setRunState('error')
+            eventName = 'message'
+            return
+          }
+
+          if (parsed.type === 'stderr') {
+            pushOutput({ type: 'stderr', content: parsed.content || '' })
+          } else {
+            pushOutput({ type: 'stdout', content: parsed.content || '' })
+          }
+        } catch {
+          pushOutput({ type: 'error', content: payloadText })
+          setRunState('error')
+        }
+
+        eventName = 'message'
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const linesChunk = buffer.split(/\r?\n/)
+        buffer = linesChunk.pop() || ''
+
+        for (const line of linesChunk) {
+          if (!line.trim()) {
+            dispatchEvent()
+            continue
+          }
+
+          if (line.startsWith('event:')) {
+            eventName = line.slice(6).trim() || 'message'
+            continue
+          }
+
+          if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trimStart())
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        dataLines.push(buffer.trim())
+        dispatchEvent()
+      }
+
+      setRunState((current) => (current === 'running' ? 'done' : current))
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setRunOutput((prev) => [...prev, { type: 'info', content: 'Execution canceled.' }])
+        setRunState('idle')
+      } else {
+        setRunOutput((prev) => [
+          ...prev,
+          {
+            type: 'error',
+            content:
+              error instanceof Error ? error.message : 'Code execution failed unexpectedly.',
+          },
+        ])
+        setRunState('error')
+      }
+    } finally {
+      runAbortRef.current = null
+    }
+  }
+
   const onToggleExpanded = () => {
     setIsExpanded((previous) => {
       const next = !previous
       CODE_BLOCK_EXPANSION_MEMORY.set(expansionKey, next)
       return next
     })
+  }
+
+  const onOpenRunPanel = () => {
+    setIsRunPanelOpen(true)
+  }
+
+  const onCloseRunPanel = () => {
+    setIsRunPanelOpen(false)
   }
 
   return (
@@ -1427,6 +1603,25 @@ function CopyableCodeBlock({
           <button type="button" onClick={onCopy} className="ghost-button code-button">
             <Copy size={13} />
             <span className="code-button-label">{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onOpenRunPanel()
+              void onRunCode()
+            }}
+            className="ghost-button code-button"
+            disabled={!runnableLanguage || runState === 'running'}
+            title={
+              runnableLanguage
+                ? runState === 'running'
+                  ? 'Running code'
+                  : `Run ${runnableLanguage}`
+                : 'Run is available for Python, JavaScript, C/C++, Java, Rust, Go, and Bash'
+            }
+          >
+            {runState === 'running' ? <Loader2 size={13} className="action-icon-spin" /> : <Play size={13} />}
+            <span className="code-button-label">{runState === 'running' ? 'Running' : 'Run'}</span>
           </button>
         </div>
       </div>
@@ -1486,6 +1681,72 @@ function CopyableCodeBlock({
         )}
         {isCollapsed && <div className="code-fade" aria-hidden="true" />}
       </div>
+      {isRunPanelOpen && (
+        <div className="code-run-drawer-overlay">
+          <aside
+            className="code-run-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Code execution output"
+          >
+            <header className="code-run-drawer-head">
+              <h4>Console</h4>
+              <div className="code-run-drawer-actions">
+                <button
+                  type="button"
+                  className="ghost-button code-button"
+                  onClick={() => void onRunCode()}
+                  disabled={!runnableLanguage || runState === 'running'}
+                  title={runState === 'running' ? 'Running' : 'Run'}
+                >
+                  {runState === 'running' ? (
+                    <Loader2 size={13} className="action-icon-spin" />
+                  ) : (
+                    <Play size={13} />
+                  )}
+                  <span className="code-button-label">
+                    {runState === 'running' ? 'Running' : 'Run'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button code-run-close"
+                  onClick={onCloseRunPanel}
+                  aria-label="Close code runner panel"
+                  title="Close"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </header>
+            <div className="code-run-output" role="status" aria-live="polite">
+              <pre className="code-run-output-body">
+                {runOutput.map((entry, index) => (
+                  <span key={`${entry.type}-${index}`} className={`code-run-line ${entry.type}`}>
+                    {entry.content}
+                  </span>
+                ))}
+              </pre>
+            </div>
+            <div className="code-run-input-area">
+              <label htmlFor={`run-input-${expansionKey}`} className="code-run-input-label">
+                Program input
+              </label>
+              <textarea
+                id={`run-input-${expansionKey}`}
+                className="code-run-input"
+                value={runInput}
+                onChange={(event) => setRunInput(event.target.value)}
+                placeholder="Optional stdin input. Use new lines for multiple values."
+                rows={4}
+              />
+              <p className="code-run-input-hint">
+                This value is sent as <strong>input</strong> to the backend.
+              </p>
+            </div>
+          </aside>
+        </div>
+      )}
       {isCollapsed && (
         <div className="code-status-note">
           Showing first {MAX_COLLAPSED_LINES} of {totalLines} lines.
