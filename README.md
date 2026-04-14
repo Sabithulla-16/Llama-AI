@@ -41,6 +41,10 @@ export default defineConfig([
   VITE_SUPABASE_ANON_KEY=...
   ```
 
+  Security note:
+  Use ONLY the Supabase anon public key in VITE_SUPABASE_ANON_KEY.
+  Never use a service_role key in frontend env variables because VITE_* values are exposed to the browser.
+
   ## Run
 
   ```bash

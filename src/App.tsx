@@ -56,11 +56,14 @@ import {
   Share2,
   Link2,
   Download,
+  ThumbsUp,
+  ThumbsDown,
   Eye,
   EyeOff,
   RotateCcw,
   Keyboard,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   Mic,
@@ -76,6 +79,7 @@ import {
   X,
   Volume2,
   Sparkles,
+  GitBranch,
   Palette,
   Shield,
   Mail,
@@ -85,6 +89,7 @@ import {
 } from 'lucide-react'
 
 type Role = 'user' | 'assistant'
+type FeedbackValue = 'like' | 'dislike'
 
 type Conversation = {
   id: string
@@ -93,6 +98,7 @@ type Conversation = {
   is_shared?: boolean | null
   share_token?: string | null
   created_at: string
+  last_used_at?: string | null
 }
 
 type ChatMessage = {
@@ -100,6 +106,9 @@ type ChatMessage = {
   conversation_id: string
   role: Role
   content: string
+  feedback?: FeedbackValue | null
+  parent_id?: string | null
+  branch_id?: number | null
   model?: AIModel | null
   model_used?: AIModel | null
   created_at: string
@@ -110,7 +119,7 @@ type ResponseStyle = 'balanced' | 'concise' | 'detailed'
 type PromptPurpose = 'general' | 'coding' | 'business' | 'study' | 'writing'
 type TextAIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart'
 type ComposerModel = TextAIModel | 'image'
-type AIModel = ComposerModel | 'blimp'
+type AIModel = ComposerModel | 'blimp' | 'sd-turbo'
 type VoiceLanguage = 'en-US' | 'en-GB'
 type GenerationOptions = {
   isRegenerate?: boolean
@@ -140,6 +149,41 @@ type GalleryImageItem = {
   createdAt: string
 }
 
+type BranchPreferenceRecord = {
+  preferred: 'original' | 'branch'
+  originalContent: string
+  branchContent: string
+  updatedAt: string
+}
+
+type BranchPreferenceRecordMap = Record<string, BranchPreferenceRecord>
+
+type ImageVariantRecord = {
+  preferred: 'original' | 'variant'
+  originalSrc: string
+  variantSrc: string
+  prompt: string
+  updatedAt: string
+}
+
+type ImageVariantRecordMap = Record<string, ImageVariantRecord>
+
+type UserSettingsRow = {
+  user_id: string
+  display_name: string | null
+  theme: ThemeMode | null
+  response_style: ResponseStyle | null
+  prompt_purpose: PromptPurpose | null
+  enter_to_send: boolean | null
+  read_after_send: boolean | null
+  suggestion_count: 4 | 6 | null
+  voice_language: VoiceLanguage | null
+  read_voice_uri: string | null
+  confirm_clear_chats: boolean | null
+  chat_export_enabled: boolean | null
+  data_analytics_enabled: boolean | null
+}
+
 const API_BASE =
   ((import.meta.env.VITE_API_BASE_URL as string | undefined) ||
     'https://valtry-llama3-2-3b-quantized.hf.space').replace(/\/+$/, '')
@@ -156,6 +200,9 @@ const CODE_RUNNER_STREAM_API = CODE_RUNNER_API.endsWith('/run/stream')
   : `${CODE_RUNNER_API}/run/stream`
 const STOP_API = `${API_BASE}/v1/stop`
 const IMAGE_GEN_STOP_API = `${IMAGE_GEN_API_BASE}/v1/stop`
+const FEEDBACK_API_TARGETS = Array.from(
+  new Set([`${API_BASE}/v1/feedback`, `${IMAGE_GEN_API_BASE}/v1/feedback`]),
+)
 const IMAGE_STREAM_API = `${API_BASE}/v1/chat/image/stream`
 const IMAGE_GENERATE_API = `${IMAGE_GEN_API_BASE}/generate`
 const MODEL_ENDPOINTS: Record<TextAIModel, string> = {
@@ -173,6 +220,7 @@ const MODEL_ENGINE_LABELS: Record<AIModel, string> = {
   smart: 'Smart',
   image: 'SD-Turbo',
   blimp: 'Blip',
+  'sd-turbo': 'SD-Turbo',
 }
 
 const COMPOSER_MODEL_LABELS: Record<ComposerModel, string> = {
@@ -195,9 +243,52 @@ const isTextAIModel = (value: unknown): value is TextAIModel =>
 const isComposerModel = (value: unknown): value is ComposerModel =>
   value === 'image' || isTextAIModel(value)
 
+const isFeedbackValue = (value: unknown): value is FeedbackValue =>
+  value === 'like' || value === 'dislike'
+
 const getMessageModel = (message: ChatMessage): AIModel | null => {
-  const candidate = message.model ?? message.model_used
+  const candidate = message.model_used ?? message.model
   return isAIModel(candidate) ? candidate : null
+}
+
+const inferAssistantModelFromThread = (
+  messages: ChatMessage[],
+  assistantIndex: number,
+): AIModel | null => {
+  const message = messages[assistantIndex]
+  if (!message || message.role !== 'assistant') return null
+
+  const persistedModel = getMessageModel(message)
+  if (persistedModel) return persistedModel
+
+  const payload = tryParseMessagePayload(message.content)
+  const payloadModel =
+    payload && typeof payload.model === 'string'
+      ? payload.model.trim().toLowerCase()
+      : ''
+
+  if (payloadModel === 'sd-turbo') return 'sd-turbo'
+  if (payloadModel === 'blimp') return 'blimp'
+  if (payloadModel === 'image') return 'sd-turbo'
+
+  const assistantParsed = parseMessageContent(message.content)
+  if (assistantParsed.imageDataUrl) {
+    return 'sd-turbo'
+  }
+
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index]
+    if (!candidate || candidate.role !== 'user') continue
+
+    const userParsed = parseMessageContent(candidate.content)
+    if (userParsed.imageDataUrl || userParsed.hasLegacyImageTag) {
+      return 'blimp'
+    }
+
+    break
+  }
+
+  return null
 }
 const PURPOSE_PROMPTS: Record<PromptPurpose, string[]> = {
   general: [
@@ -300,6 +391,12 @@ const hashCodeBlockKey = (value: string) => {
   }
   return String(hash)
 }
+
+const getBranchPreferenceContentKey = (originalContent: string) =>
+  hashCodeBlockKey(cleanAssistantOutput(originalContent).trim())
+
+const getImageVariantContentKey = (messageContent: string) =>
+  hashCodeBlockKey(parseMessageContent(messageContent).imageDataUrl || '')
 
 const VOICE_LANGUAGE_LABELS: Record<VoiceLanguage, string> = {
   'en-US': 'English (US)',
@@ -633,8 +730,8 @@ const CONVERSATION_GROUP_LABELS: Record<ConversationGroupKey, string> = {
   older: 'More than 7 Days',
 }
 
-function getConversationGroupKey(createdAt: string, now = new Date()): ConversationGroupKey {
-  const createdDate = new Date(createdAt)
+function getConversationGroupKey(timestamp: string, now = new Date()): ConversationGroupKey {
+  const createdDate = new Date(timestamp)
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const startCreated = new Date(
     createdDate.getFullYear(),
@@ -653,8 +750,31 @@ function getConversationGroupKey(createdAt: string, now = new Date()): Conversat
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
+const readJwtRole = (token: string | undefined) => {
+  if (!token) return null
+  const parts = token.split('.')
+  if (parts.length < 2) return null
+
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padLength = (4 - (base64.length % 4)) % 4
+    const padded = base64.padEnd(base64.length + padLength, '=')
+    const json = JSON.parse(globalThis.atob(padded)) as { role?: unknown }
+    return typeof json.role === 'string' ? json.role : null
+  } catch {
+    return null
+  }
+}
+
+const supabaseKeyRole = readJwtRole(supabaseAnonKey)
+const supabaseConfigError = !supabaseUrl || !supabaseAnonKey
+  ? 'Missing Supabase keys. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
+  : supabaseKeyRole === 'service_role'
+  ? 'Security misconfiguration: VITE_SUPABASE_ANON_KEY contains a service_role key. Use the public anon key only.'
+  : null
+
 const supabase =
-  supabaseUrl && supabaseAnonKey
+  !supabaseConfigError && supabaseUrl && supabaseAnonKey
     ? createClient(supabaseUrl, supabaseAnonKey)
     : null
 
@@ -706,6 +826,7 @@ type ParsedMessageContent = {
   imageDataUrl?: string
   imagePrompt: string
   hasLegacyImageTag: boolean
+  isImageLoading?: boolean
 }
 
 function tryParseMessagePayload(content: string) {
@@ -749,6 +870,16 @@ function parseMessageContent(content: string): ParsedMessageContent {
       imageDataUrl: toDataUrlFromBase64(payload.data),
       imagePrompt: prompt,
       hasLegacyImageTag: false,
+    }
+  }
+
+  if (payloadType === 'image_loading') {
+    const prompt = typeof payload?.prompt === 'string' ? payload.prompt.trim() : ''
+    return {
+      text: '',
+      imagePrompt: prompt,
+      hasLegacyImageTag: false,
+      isImageLoading: true,
     }
   }
 
@@ -854,6 +985,28 @@ function isUuid(value: string) {
   )
 }
 
+async function submitMessageFeedback(messageId: string, feedback: FeedbackValue) {
+  const settled = await Promise.allSettled(
+    FEEDBACK_API_TARGETS.map((apiUrl) =>
+      fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message_id: messageId, feedback }),
+      }),
+    ),
+  )
+
+  const success = settled.some(
+    (result) => result.status === 'fulfilled' && result.value.ok,
+  )
+
+  if (!success) {
+    throw new Error('Unable to save feedback.')
+  }
+}
+
 async function streamCompletion(
   apiUrl: string,
   payload: {
@@ -863,6 +1016,8 @@ async function streamCompletion(
     temperature?: number
     max_tokens?: number
     stream?: boolean
+    branch?: boolean
+    parent_id?: string
   },
   signal: AbortSignal,
   onToken: (token: string) => void,
@@ -881,6 +1036,8 @@ async function streamCompletion(
       temperature: payload.temperature ?? 0.7,
       max_tokens: payload.max_tokens ?? 512,
       stream: payload.stream ?? true,
+      branch: payload.branch ?? false,
+      parent_id: payload.parent_id,
     }),
     signal,
   })
@@ -987,6 +1144,8 @@ async function streamImageCompletion(
     conversation_id: string
     prompt: string
     file: File
+    branch?: boolean
+    parent_id?: string
   },
   signal: AbortSignal,
   onToken: (token: string) => void,
@@ -998,6 +1157,10 @@ async function streamImageCompletion(
   formData.append('conversation_id', payload.conversation_id)
   formData.append('prompt', payload.prompt)
   formData.append('file', payload.file)
+  formData.append('branch', String(payload.branch ?? false))
+  if (payload.parent_id) {
+    formData.append('parent_id', payload.parent_id)
+  }
 
   const response = await fetch(apiUrl, {
     method: 'POST',
@@ -1135,6 +1298,8 @@ async function generateImageFromPrompt(
     user_id: string
     conversation_id: string
     prompt: string
+    branch?: boolean
+    parent_id?: string
   },
   signal: AbortSignal,
 ) {
@@ -1143,7 +1308,13 @@ async function generateImageFromPrompt(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      user_id: payload.user_id,
+      conversation_id: payload.conversation_id,
+      prompt: payload.prompt,
+      branch: payload.branch ?? false,
+      parent_id: payload.parent_id,
+    }),
     signal,
   })
 
@@ -1907,8 +2078,8 @@ function AuthScreen() {
 
           {!supabase && (
             <p className="error-text">
-              Missing Supabase keys. Set VITE_SUPABASE_URL and
-              VITE_SUPABASE_ANON_KEY.
+              {supabaseConfigError ||
+                'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'}
             </p>
           )}
 
@@ -2202,7 +2373,88 @@ function ImageGenerationPlaceholder({
   )
 }
 
+function ProgressiveImage({
+  src,
+  alt,
+  className,
+  shellClassName,
+  onClick,
+  loading = 'lazy',
+}: {
+  src: string | undefined
+  alt: string
+  className?: string
+  shellClassName?: string
+  onClick?: () => void
+  loading?: 'lazy' | 'eager'
+}) {
+  const [isLoaded, setIsLoaded] = useState(false)
+  const imageRef = useRef<HTMLImageElement | null>(null)
+
+  useEffect(() => {
+    setIsLoaded(false)
+  }, [src])
+
+  useEffect(() => {
+    const image = imageRef.current
+    if (!image) return
+
+    // Cached images can be complete before onLoad runs.
+    if (image.complete && image.naturalWidth > 0) {
+      setIsLoaded(true)
+    }
+  }, [src])
+
+  if (!src) return null
+
+  return (
+    <div className={`progressive-image-shell ${shellClassName || ''} ${isLoaded ? 'loaded' : 'loading'}`}>
+      {!isLoaded && (
+        <span className="progressive-image-loader" aria-hidden="true">
+          <span className="progressive-image-loader-core">
+            <span className="progressive-image-loader-ring ring-a" />
+            <span className="progressive-image-loader-ring ring-b" />
+            <span className="progressive-image-loader-center">
+              <img src="/llama_logo_transparent.png" alt="" />
+            </span>
+          </span>
+        </span>
+      )}
+      <img
+        ref={imageRef}
+        src={src}
+        alt={alt}
+        className={`${className || ''} ${isLoaded ? 'progressive-image-visible' : 'progressive-image-hidden'}`}
+        loading={loading}
+        decoding="async"
+        onLoad={() => setIsLoaded(true)}
+        onError={() => setIsLoaded(true)}
+        onClick={onClick}
+      />
+    </div>
+  )
+}
+
+function ImageSlotLoader() {
+  return (
+    <div className="message-image-card assistant-generated-image-card">
+      <div className="progressive-image-shell image-slot-loader-shell loading" aria-hidden="true">
+        <span className="progressive-image-loader">
+          <span className="progressive-image-loader-core">
+            <span className="progressive-image-loader-ring ring-a" />
+            <span className="progressive-image-loader-ring ring-b" />
+            <span className="progressive-image-loader-center">
+              <img src="/llama_logo_transparent.png" alt="" />
+            </span>
+          </span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 type ChatWorkspaceProps = {
+  currentUserId: string
   conversations: Conversation[]
   activeConversationId: string | null
   isLoadingConversation: boolean
@@ -2243,6 +2495,7 @@ type ChatWorkspaceProps = {
   onShareMessage: (content: string, imageSrc?: string) => Promise<void>
   onShareConversation: (conversationId: string) => Promise<void>
   onDeleteConversationRequest: (conversationId: string) => void
+  onShowNotice: (message: string) => void
   onConfirmDeleteConversation: () => Promise<void>
   onCancelDeleteConversation: () => void
   onSelectConversation: (conversationId: string) => void
@@ -2253,6 +2506,7 @@ type ChatWorkspaceProps = {
 }
 
 function ChatWorkspace({
+  currentUserId,
   conversations,
   activeConversationId,
   isLoadingConversation,
@@ -2283,6 +2537,7 @@ function ChatWorkspace({
   onShareMessage,
   onShareConversation,
   onDeleteConversationRequest,
+  onShowNotice,
   onConfirmDeleteConversation,
   onCancelDeleteConversation,
   onSelectConversation,
@@ -2295,21 +2550,208 @@ function ChatWorkspace({
   const visibleMessages = useMemo(() => {
     const normalizePrompt = (value: string) =>
       parseMessageContent(value).imagePrompt.replace(/\s+/g, ' ').trim().toLowerCase()
+    const normalizeAssistantText = (value: string) =>
+      cleanAssistantOutput(parseMessageContent(value).text)
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase()
+    const normalizeAssistantImage = (value: string) =>
+      (parseMessageContent(value).imageDataUrl || '').trim()
 
-    return activeMessages.reduce<ChatMessage[]>((accumulator, message) => {
+    const getNextAssistantSignature = (messages: ChatMessage[], userIndex: number) => {
+      for (let i = userIndex + 1; i < messages.length; i += 1) {
+        const candidate = messages[i]
+        if (candidate.role === 'user') break
+        if (candidate.role !== 'assistant') continue
+
+        const parsed = parseMessageContent(candidate.content)
+        if (parsed.imageDataUrl) {
+          return `image::${parsed.imageDataUrl.trim()}`
+        }
+
+        const text = cleanAssistantOutput(parsed.text).replace(/\s+/g, ' ').trim().toLowerCase()
+        if (text) {
+          return `text::${text}`
+        }
+      }
+
+      return ''
+    }
+
+    const seenTurnSignatures = new Set<string>()
+    const seenAssistantImages = new Set<string>()
+
+    return activeMessages.reduce<ChatMessage[]>((accumulator, message, index, source) => {
+      // Branch responses are selected via preference UI and should not appear as extra timeline rows.
+      if (message.role === 'assistant' && message.parent_id) {
+        return accumulator
+      }
+
+      // Keep only one root assistant row per turn; response switching happens via arrows.
       const previous = accumulator[accumulator.length - 1]
       if (
         previous &&
-        previous.role === message.role &&
-        message.role === 'user' &&
-        normalizePrompt(previous.content) === normalizePrompt(message.content)
+        previous.role === 'assistant' &&
+        message.role === 'assistant' &&
+        !previous.parent_id &&
+        !message.parent_id
       ) {
         return accumulator
+      }
+
+      if (message.role === 'assistant') {
+        const imageSignature = normalizeAssistantImage(message.content)
+        if (imageSignature) {
+          if (seenAssistantImages.has(imageSignature)) {
+            return accumulator
+          }
+          seenAssistantImages.add(imageSignature)
+        }
+      }
+
+      if (message.role === 'user') {
+        const promptSignature = normalizePrompt(message.content)
+        const nextAssistantSignature = getNextAssistantSignature(source, index)
+        if (promptSignature && nextAssistantSignature) {
+          const turnSignature = `${promptSignature}::${nextAssistantSignature}`
+          if (seenTurnSignatures.has(turnSignature)) {
+            return accumulator
+          }
+          seenTurnSignatures.add(turnSignature)
+        }
+      }
+
+      const previousRow = accumulator[accumulator.length - 1]
+      if (
+        previousRow &&
+        previousRow.role === message.role &&
+        message.role === 'user' &&
+        normalizePrompt(previousRow.content) === normalizePrompt(message.content)
+      ) {
+        return accumulator
+      }
+
+      if (
+        previousRow &&
+        previousRow.role === 'assistant' &&
+        message.role === 'assistant' &&
+        normalizeAssistantText(previousRow.content) === normalizeAssistantText(message.content)
+      ) {
+        return accumulator
+      }
+
+      if (
+        previousRow &&
+        previousRow.role === 'assistant' &&
+        message.role === 'assistant'
+      ) {
+        const previousImage = normalizeAssistantImage(previousRow.content)
+        const currentImage = normalizeAssistantImage(message.content)
+        if (previousImage && currentImage && previousImage === currentImage) {
+          return accumulator
+        }
       }
 
       accumulator.push(message)
       return accumulator
     }, [])
+  }, [activeMessages])
+
+  const persistedBranchContentByParentId = useMemo(() => {
+    const next: Record<string, string> = {}
+
+    activeMessages.forEach((message) => {
+      if (message.role !== 'assistant' || !message.parent_id) return
+      const parsed = parseMessageContent(message.content)
+      const branchText = cleanAssistantOutput(parsed.text).trim()
+      if (!branchText) return
+
+      // Keep the latest branch content for a given parent message.
+      next[message.parent_id] = branchText
+    })
+
+    return next
+  }, [activeMessages])
+
+  const persistedImageVariantByParentId = useMemo(() => {
+    const next: Record<string, string> = {}
+
+    activeMessages.forEach((message) => {
+      if (message.role !== 'assistant' || !message.parent_id) return
+      const parsed = parseMessageContent(message.content)
+      if (!parsed.imageDataUrl) return
+      next[message.parent_id] = parsed.imageDataUrl
+    })
+
+    return next
+  }, [activeMessages])
+
+  const inferredImageTurnMerges = useMemo(() => {
+    const variantByAssistantId: Record<string, string> = {}
+    const suppressedMessageIds = new Set<string>()
+
+    const turns: Array<{
+      userId: string
+      promptSignature: string
+      assistantId: string
+      assistantImageSrc: string
+    }> = []
+
+    for (let i = 0; i < activeMessages.length; i += 1) {
+      const message = activeMessages[i]
+      if (message.role !== 'user') continue
+
+      const promptSignature = parseMessageContent(message.content)
+        .imagePrompt.replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase()
+
+      if (!promptSignature) continue
+
+      let assistantId = ''
+      let assistantImageSrc = ''
+
+      for (let j = i + 1; j < activeMessages.length; j += 1) {
+        const candidate = activeMessages[j]
+        if (candidate.role === 'user') break
+        if (candidate.role !== 'assistant' || candidate.parent_id) continue
+
+        const parsedCandidate = parseMessageContent(candidate.content)
+        if (parsedCandidate.imageDataUrl) {
+          assistantId = candidate.id
+          assistantImageSrc = parsedCandidate.imageDataUrl
+          break
+        }
+      }
+
+      if (assistantId && assistantImageSrc) {
+        turns.push({
+          userId: message.id,
+          promptSignature,
+          assistantId,
+          assistantImageSrc,
+        })
+      }
+    }
+
+    for (let i = 1; i < turns.length; i += 1) {
+      const previousTurn = turns[i - 1]
+      const currentTurn = turns[i]
+
+      if (
+        previousTurn.promptSignature === currentTurn.promptSignature &&
+        previousTurn.assistantImageSrc !== currentTurn.assistantImageSrc
+      ) {
+        variantByAssistantId[previousTurn.assistantId] = currentTurn.assistantImageSrc
+        suppressedMessageIds.add(currentTurn.userId)
+        suppressedMessageIds.add(currentTurn.assistantId)
+      }
+    }
+
+    return {
+      variantByAssistantId,
+      suppressedMessageIds,
+    }
   }, [activeMessages])
 
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -2351,11 +2793,189 @@ function ChatWorkspace({
   const lastScrollTopRef = useRef(0)
   const hasScrolledUpRef = useRef(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [feedbackByMessageId, setFeedbackByMessageId] = useState<
+    Record<string, FeedbackValue>
+  >({})
+  const [feedbackSavingMessageId, setFeedbackSavingMessageId] = useState<string | null>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [showImageModal, setShowImageModal] = useState(false)
+  const [branchComparisons, setBranchComparisons] = useState<
+    Record<
+      string,
+      {
+        originalContent: string
+        branchContent: string
+        loading: boolean
+        preferred: 'original' | 'branch' | null
+      }
+    >
+  >({})
+  const [branchPreferenceRecords, setBranchPreferenceRecords] =
+    useState<BranchPreferenceRecordMap>({})
+  const [imageComparisons, setImageComparisons] = useState<
+    Record<
+      string,
+      {
+        originalSrc: string
+        variantSrc: string
+        prompt: string
+        loading: boolean
+        preferred: 'original' | 'variant' | null
+      }
+    >
+  >({})
+  const [imageVariantRecords, setImageVariantRecords] = useState<ImageVariantRecordMap>({})
+  const [activeBranchSelectionId, setActiveBranchSelectionId] = useState<string | null>(null)
+  const [activeImageSelectionId, setActiveImageSelectionId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const branchAbortControllersRef = useRef<Record<string, AbortController>>({})
+  const imageVariantAbortControllersRef = useRef<Record<string, AbortController>>({})
+  const branchPreferenceStorageKey = useMemo(() => {
+    if (!currentUserId || !activeConversationId) return null
+    return `branch-preferences:${currentUserId}:${activeConversationId}`
+  }, [activeConversationId, currentUserId])
+
+  const sharedBranchPreferenceStorageKey = useMemo(() => {
+    if (!activeConversationId) return null
+    return `branch-preferences-shared:${activeConversationId}`
+  }, [activeConversationId])
+  const branchPreferenceRecordStorageKey = useMemo(() => {
+    if (!activeConversationId) return null
+    return `branch-preference-records:${activeConversationId}`
+  }, [activeConversationId])
+  const imageVariantStorageKey = useMemo(() => {
+    if (!activeConversationId) return null
+    return `image-variant-records:${activeConversationId}`
+  }, [activeConversationId])
+
+  const imageVariantRelation = useMemo(() => {
+    const variantOnlySet = new Set<string>()
+    const originalSet = new Set<string>()
+
+    Object.values(imageVariantRecords).forEach((record) => {
+      if (record.originalSrc) {
+        originalSet.add(record.originalSrc.trim())
+      }
+      if (record.variantSrc) {
+        variantOnlySet.add(record.variantSrc.trim())
+      }
+    })
+
+    // If an image appears as both original and variant, do not treat it as variant-only.
+    originalSet.forEach((src) => {
+      variantOnlySet.delete(src)
+    })
+
+    return {
+      variantOnlySet,
+    }
+  }, [imageVariantRecords])
+
+  useEffect(() => {
+    if (!branchPreferenceStorageKey) {
+      setBranchComparisons({})
+      return
+    }
+
+    try {
+      const raw = localStorage.getItem(branchPreferenceStorageKey)
+      if (!raw) {
+        setBranchComparisons({})
+        return
+      }
+
+      const parsed = JSON.parse(raw) as typeof branchComparisons
+      if (parsed && typeof parsed === 'object') {
+        setBranchComparisons(parsed)
+      } else {
+        setBranchComparisons({})
+      }
+    } catch {
+      setBranchComparisons({})
+    }
+  }, [branchPreferenceStorageKey])
+
+  useEffect(() => {
+    if (!branchPreferenceRecordStorageKey) {
+      setBranchPreferenceRecords({})
+      return
+    }
+
+    try {
+      const raw = localStorage.getItem(branchPreferenceRecordStorageKey)
+      if (!raw) {
+        setBranchPreferenceRecords({})
+        return
+      }
+
+      const parsed = JSON.parse(raw) as BranchPreferenceRecordMap
+      if (parsed && typeof parsed === 'object') {
+        setBranchPreferenceRecords(parsed)
+      } else {
+        setBranchPreferenceRecords({})
+      }
+    } catch {
+      setBranchPreferenceRecords({})
+    }
+  }, [branchPreferenceRecordStorageKey])
+
+  useEffect(() => {
+    if (!imageVariantStorageKey) {
+      setImageVariantRecords({})
+      setImageComparisons({})
+      return
+    }
+
+    try {
+      const raw = localStorage.getItem(imageVariantStorageKey)
+      if (!raw) {
+        setImageVariantRecords({})
+        setImageComparisons({})
+        return
+      }
+
+      const parsed = JSON.parse(raw) as ImageVariantRecordMap
+      if (parsed && typeof parsed === 'object') {
+        setImageVariantRecords(parsed)
+      } else {
+        setImageVariantRecords({})
+      }
+    } catch {
+      setImageVariantRecords({})
+    }
+  }, [imageVariantStorageKey])
+
+  useEffect(() => {
+    if (!branchPreferenceStorageKey) return
+    try {
+      localStorage.setItem(branchPreferenceStorageKey, JSON.stringify(branchComparisons))
+    } catch {
+      // Ignore localStorage write failures.
+    }
+  }, [branchComparisons, branchPreferenceStorageKey])
+
+  useEffect(() => {
+    if (!branchPreferenceRecordStorageKey) return
+    try {
+      localStorage.setItem(
+        branchPreferenceRecordStorageKey,
+        JSON.stringify(branchPreferenceRecords),
+      )
+    } catch {
+      // Ignore localStorage write failures.
+    }
+  }, [branchPreferenceRecordStorageKey, branchPreferenceRecords])
+
+  useEffect(() => {
+    if (!imageVariantStorageKey) return
+    try {
+      localStorage.setItem(imageVariantStorageKey, JSON.stringify(imageVariantRecords))
+    } catch {
+      // Ignore localStorage write failures.
+    }
+  }, [imageVariantRecords, imageVariantStorageKey])
 
   const clearSelectedImage = () => {
     setSelectedImageFile(null)
@@ -3098,6 +3718,43 @@ function ChatWorkspace({
     setTimeout(() => setCopiedMessageId(null), 2000)
   }
 
+  const getAssistantFeedback = (message: ChatMessage) => {
+    const localValue = feedbackByMessageId[message.id]
+    if (isFeedbackValue(localValue)) return localValue
+    return isFeedbackValue(message.feedback) ? message.feedback : null
+  }
+
+  const handleMessageFeedback = async (message: ChatMessage, feedback: FeedbackValue) => {
+    if (message.role !== 'assistant') return
+    if (!isUuid(message.id)) return
+
+    const previous = getAssistantFeedback(message)
+    setFeedbackByMessageId((prev) => ({
+      ...prev,
+      [message.id]: feedback,
+    }))
+    setFeedbackSavingMessageId(message.id)
+
+    try {
+      await submitMessageFeedback(message.id, feedback)
+      onShowNotice('Thanks for Feedback')
+    } catch {
+      setFeedbackByMessageId((prev) => {
+        const next = { ...prev }
+        if (previous) {
+          next[message.id] = previous
+        } else {
+          delete next[message.id]
+        }
+        return next
+      })
+    } finally {
+      setFeedbackSavingMessageId((current) =>
+        current === message.id ? null : current,
+      )
+    }
+  }
+
   const handleDownloadAssistantImage = (imageSrc?: string) => {
     if (!imageSrc) return
     const link = document.createElement('a')
@@ -3120,10 +3777,11 @@ function ChatWorkspace({
     if (messageIndex <= 0) return
 
     const targetMessage = activeMessages[messageIndex]
+    const targetModel = inferAssistantModelFromThread(activeMessages, messageIndex)
     const targetParsedContent = parseMessageContent(targetMessage?.content || '')
     const regenerateModel: AIModel =
-      getMessageModel(targetMessage) ||
-      (targetParsedContent.imageDataUrl ? 'image' : messageModel || 'llama')
+      targetModel ||
+      (targetParsedContent.imageDataUrl ? 'sd-turbo' : messageModel || 'llama')
 
     const promptImageCursor: Record<string, number> = {}
 
@@ -3175,15 +3833,582 @@ function ChatWorkspace({
     }
   }
 
+  const resolvePersistedAssistantParentId = async (
+    messageId: string,
+    targetMessage: ChatMessage,
+  ) => {
+    if (isUuid(messageId)) return messageId
+    if (!supabase) return null
+
+    const attempts = 8
+    const delayMs = 220
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const { data: persistedRows } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', targetMessage.conversation_id)
+        .eq('role', 'assistant')
+        .eq('content', targetMessage.content)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      const persistedId = persistedRows?.[0]?.id as string | undefined
+      if (persistedId && isUuid(persistedId)) {
+        return persistedId
+      }
+
+      if (attempt < attempts - 1) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, delayMs)
+        })
+      }
+    }
+
+    return null
+  }
+
+  const persistBranchAssistantModel = async (
+    conversationId: string,
+    model: AIModel,
+    assistantContent: string,
+  ) => {
+    if (!supabase) return
+
+    const attempts = 20
+    const retryDelayMs = 300
+    const normalizedContent = cleanAssistantOutput(assistantContent).trim()
+    if (!normalizedContent) return
+
+    const getComparableAssistantText = (content: string) => {
+      const parsed = parseMessageContent(content)
+      if (parsed.imageDataUrl) return ''
+      return cleanAssistantOutput(parsed.text || content).trim()
+    }
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const { data: recentAssistantRows } = await supabase
+        .from('messages')
+        .select('id, content')
+        .eq('conversation_id', conversationId)
+        .eq('role', 'assistant')
+        .order('created_at', { ascending: false })
+        .limit(60)
+
+      const targetAssistantId = (recentAssistantRows || []).find((row) => {
+        const candidateText = getComparableAssistantText(String(row.content || ''))
+        return candidateText === normalizedContent
+      })?.id as string | undefined
+
+      if (targetAssistantId) {
+        const { error: writeBothError } = await supabase
+          .from('messages')
+          .update({ model: model, model_used: model })
+          .eq('id', targetAssistantId)
+
+        if (writeBothError) {
+          const { error: modelOnlyError } = await supabase
+            .from('messages')
+            .update({ model })
+            .eq('id', targetAssistantId)
+
+          if (modelOnlyError) {
+            await supabase
+              .from('messages')
+              .update({ model_used: model })
+              .eq('id', targetAssistantId)
+          }
+        }
+        return
+      }
+
+      if (attempt < attempts - 1) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, retryDelayMs)
+        })
+      }
+    }
+  }
+
+  const handleBranchResponse = async (
+    messageId: string,
+    messageModel: AIModel | null,
+    messageContent: string,
+  ) => {
+    if (isGenerating) return
+    if (!currentUserId) return
+
+    const messageIndex = activeMessages.findIndex((message) => message.id === messageId)
+    if (messageIndex <= 0) return
+
+    const targetMessage = activeMessages[messageIndex]
+    if (!targetMessage || targetMessage.role !== 'assistant') return
+
+    const modelToUse =
+      inferAssistantModelFromThread(activeMessages, messageIndex) ||
+      messageModel ||
+      activeConversationModel
+    const isImageAnalysisBranch = modelToUse === 'blimp'
+
+    const promptImageCursor: Record<string, number> = {}
+    let branchPrompt = ''
+    let branchImageSrc: string | undefined
+    let branchImageName = 'image.png'
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const candidate = activeMessages[index]
+      if (candidate?.role !== 'user') continue
+      const parsedCandidate = parseMessageContent(candidate.content)
+
+      const imageTagMatch = candidate.content.match(/\[Image:\s*([^\]]+)\]/)
+      const imageTag = imageTagMatch?.[1]?.trim().toLowerCase()
+      const imageTagKey = imageTag ? `${candidate.conversation_id}::${imageTag}` : null
+      const promptSignatureImage = resolveImageFromPromptSignature(
+        candidate,
+        imagePromptDataMap,
+        promptImageCursor,
+      )
+      branchImageSrc =
+        parsedCandidate.imageDataUrl ||
+        imageDataMap[candidate.id] ||
+        (imageTagKey ? imageTagDataMap[imageTagKey] : undefined) ||
+        promptSignatureImage
+      branchImageName = imageTagMatch?.[1]?.trim() || 'image.png'
+
+      branchPrompt = parsedCandidate.imagePrompt || parsedCandidate.text || candidate.content
+      break
+    }
+
+    if (!branchPrompt.trim()) {
+      branchPrompt = 'Please provide an alternative response to the previous answer.'
+    }
+
+    if (isImageAnalysisBranch && !branchImageSrc) {
+      window.alert('Could not find the original image for branching this analysis.')
+      return
+    }
+
+    const endpoint = isTextAIModel(modelToUse) ? MODEL_ENDPOINTS[modelToUse] : null
+    const apiUrl = endpoint ? `${API_BASE}${endpoint}` : null
+    const controller = new AbortController()
+    branchAbortControllersRef.current[messageId] = controller
+    let branchBuffer = ''
+    let branchAborted = false
+
+    const resolvedParentId = await resolvePersistedAssistantParentId(messageId, targetMessage)
+
+    if (!resolvedParentId) {
+      window.alert('Please wait a moment and try branching again while we sync this response.')
+      return
+    }
+
+    setActiveBranchSelectionId(messageId)
+    requestAnimationFrame(() => {
+      messageScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    })
+
+    setBranchComparisons((prev) => ({
+      ...prev,
+      [messageId]: {
+        originalContent: parseMessageContent(messageContent).text,
+        branchContent: '',
+        loading: true,
+        preferred: null,
+      },
+    }))
+
+    try {
+      if (isImageAnalysisBranch) {
+        const blob = await (await fetch(branchImageSrc || '')).blob()
+        const imageFile = new File([blob], branchImageName, {
+          type: blob.type || 'image/png',
+        })
+
+        const runImageBranchStream = async () => {
+          await streamImageCompletion(
+            IMAGE_STREAM_API,
+            {
+              user_id: currentUserId,
+              conversation_id: targetMessage.conversation_id,
+              prompt: branchPrompt,
+              file: imageFile,
+              branch: true,
+              parent_id: resolvedParentId,
+            },
+            controller.signal,
+            (token) => {
+              branchBuffer += token
+              setBranchComparisons((prev) => ({
+                ...prev,
+                [messageId]: {
+                  originalContent:
+                    prev[messageId]?.originalContent || parseMessageContent(messageContent).text,
+                  branchContent: cleanAssistantOutput(branchBuffer),
+                  loading: true,
+                  preferred: null,
+                },
+              }))
+            },
+            undefined,
+            () => {
+              delete branchAbortControllersRef.current[messageId]
+              setBranchComparisons((prev) => ({
+                ...prev,
+                [messageId]: {
+                  originalContent:
+                    prev[messageId]?.originalContent || parseMessageContent(messageContent).text,
+                  branchContent: cleanAssistantOutput(branchBuffer),
+                  loading: false,
+                  preferred: null,
+                },
+              }))
+            },
+          )
+        }
+
+        await runImageBranchStream()
+      } else {
+        if (!apiUrl || !isTextAIModel(modelToUse)) {
+          throw new Error('Selected model does not support text branching.')
+        }
+
+        await streamCompletion(
+          apiUrl,
+          {
+            user_id: currentUserId,
+            conversation_id: targetMessage.conversation_id,
+            messages: [{ role: 'user', content: branchPrompt }],
+            temperature: 0.7,
+            max_tokens: 512,
+            stream: true,
+            branch: true,
+            parent_id: resolvedParentId,
+          },
+          controller.signal,
+          (token) => {
+            branchBuffer += token
+            setBranchComparisons((prev) => ({
+              ...prev,
+              [messageId]: {
+                originalContent:
+                  prev[messageId]?.originalContent || parseMessageContent(messageContent).text,
+                branchContent: cleanAssistantOutput(branchBuffer),
+                loading: true,
+                preferred: null,
+              },
+            }))
+          },
+          () => {
+            delete branchAbortControllersRef.current[messageId]
+            setBranchComparisons((prev) => ({
+              ...prev,
+              [messageId]: {
+                originalContent:
+                  prev[messageId]?.originalContent || parseMessageContent(messageContent).text,
+                branchContent: cleanAssistantOutput(branchBuffer),
+                loading: false,
+                preferred: null,
+              },
+            }))
+          },
+        )
+      }
+
+      const finalizedBranchContent = cleanAssistantOutput(branchBuffer).trim()
+      if (!branchAborted && finalizedBranchContent) {
+        await persistBranchAssistantModel(
+          targetMessage.conversation_id,
+          modelToUse,
+          finalizedBranchContent,
+        )
+      }
+    } catch {
+      branchAborted = controller.signal.aborted
+      delete branchAbortControllersRef.current[messageId]
+      setBranchComparisons((prev) => ({
+        ...prev,
+        [messageId]: {
+          originalContent: prev[messageId]?.originalContent || parseMessageContent(messageContent).text,
+          branchContent: prev[messageId]?.branchContent || 'Could not generate branch response.',
+          loading: false,
+          preferred: null,
+        },
+      }))
+    }
+  }
+
+  const handleStopBranchResponse = (messageId: string) => {
+    branchAbortControllersRef.current[messageId]?.abort()
+    delete branchAbortControllersRef.current[messageId]
+
+    setBranchComparisons((prev) => {
+      const current = prev[messageId]
+      if (!current) return prev
+      return {
+        ...prev,
+        [messageId]: {
+          ...current,
+          loading: false,
+        },
+      }
+    })
+  }
+
+  const handlePreferResponse = (
+    messageId: string,
+    choice: 'original' | 'branch',
+    options?: {
+      closeOverlay?: boolean
+      originalContent?: string
+      branchContent?: string
+    },
+  ) => {
+    const targetComparison = branchComparisons[messageId]
+    const originalContent =
+      options?.originalContent ?? targetComparison?.originalContent ?? ''
+    const branchContent =
+      options?.branchContent ?? targetComparison?.branchContent ?? ''
+
+    if (originalContent) {
+      const stableKey = getBranchPreferenceContentKey(originalContent)
+      setBranchPreferenceRecords((prev) => ({
+        ...prev,
+        [stableKey]: {
+          preferred: choice,
+          originalContent,
+          branchContent,
+          updatedAt: new Date().toISOString(),
+        },
+      }))
+    }
+
+    if (sharedBranchPreferenceStorageKey) {
+      try {
+        const raw = localStorage.getItem(sharedBranchPreferenceStorageKey)
+        const parsed =
+          raw && typeof raw === 'string'
+            ? (JSON.parse(raw) as Record<string, 'original' | 'branch'>)
+            : {}
+        parsed[messageId] = choice
+        localStorage.setItem(sharedBranchPreferenceStorageKey, JSON.stringify(parsed))
+      } catch {
+        // Ignore localStorage write failures.
+      }
+    }
+
+    setBranchComparisons((prev) => ({
+      ...prev,
+      [messageId]: {
+        ...(prev[messageId] || {
+          originalContent,
+          branchContent,
+          loading: false,
+          preferred: null,
+        }),
+        originalContent,
+        branchContent,
+        preferred: choice,
+      },
+    }))
+
+    if (options?.closeOverlay !== false) {
+      setActiveBranchSelectionId(null)
+    }
+  }
+
+  const handleGenerateImageVariant = async (messageId: string, messageContent: string) => {
+    if (!currentUserId) return
+
+    const targetMessage = activeMessages.find((message) => message.id === messageId)
+    if (!targetMessage || targetMessage.role !== 'assistant') return
+
+    const parsed = parseMessageContent(messageContent)
+    const originalSrc = parsed.imageDataUrl || ''
+    if (!originalSrc) return
+
+    const prompt = parsed.imagePrompt.trim() || 'Create a variation of this generated image.'
+    const controller = new AbortController()
+    imageVariantAbortControllersRef.current[messageId] = controller
+    setActiveImageSelectionId(messageId)
+    requestAnimationFrame(() => {
+      messageScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    })
+
+    setImageComparisons((prev) => ({
+      ...prev,
+      [messageId]: {
+        originalSrc,
+        variantSrc: prev[messageId]?.variantSrc || '',
+        prompt,
+        loading: true,
+        preferred: prev[messageId]?.preferred || null,
+      },
+    }))
+
+    try {
+      const resolvedParentId = await resolvePersistedAssistantParentId(messageId, targetMessage)
+
+      let generatedBase64 = ''
+      try {
+        generatedBase64 = await generateImageFromPrompt(
+          IMAGE_GENERATE_API,
+          {
+            user_id: currentUserId,
+            conversation_id: targetMessage.conversation_id,
+            prompt,
+            branch: Boolean(resolvedParentId),
+            parent_id: resolvedParentId || undefined,
+          },
+          controller.signal,
+        )
+      } catch {
+        // Fallback for image APIs that do not yet support branch payload fields.
+        generatedBase64 = await generateImageFromPrompt(
+          IMAGE_GENERATE_API,
+          {
+            user_id: currentUserId,
+            conversation_id: targetMessage.conversation_id,
+            prompt,
+          },
+          controller.signal,
+        )
+      }
+
+      const variantSrc = toDataUrlFromBase64(generatedBase64)
+      if (!variantSrc) {
+        throw new Error('Image variant generation completed without image data.')
+      }
+
+      const stableKey = getImageVariantContentKey(messageContent)
+      setImageVariantRecords((prev) => ({
+        ...prev,
+        [stableKey]: {
+          preferred: prev[stableKey]?.preferred || 'original',
+          originalSrc,
+          variantSrc,
+          prompt,
+          updatedAt: new Date().toISOString(),
+        },
+      }))
+
+      setImageComparisons((prev) => ({
+        ...prev,
+        [messageId]: {
+          originalSrc,
+          variantSrc,
+          prompt,
+          loading: false,
+          preferred: prev[messageId]?.preferred || null,
+        },
+      }))
+    } catch {
+      setImageComparisons((prev) => ({
+        ...prev,
+        [messageId]: {
+          originalSrc,
+          variantSrc: prev[messageId]?.variantSrc || '',
+          prompt,
+          loading: false,
+          preferred: prev[messageId]?.preferred || null,
+        },
+      }))
+    } finally {
+      delete imageVariantAbortControllersRef.current[messageId]
+    }
+  }
+
+  const handleStopImageVariantResponse = (messageId: string) => {
+    imageVariantAbortControllersRef.current[messageId]?.abort()
+    delete imageVariantAbortControllersRef.current[messageId]
+
+    setImageComparisons((prev) => {
+      const current = prev[messageId]
+      if (!current) return prev
+      return {
+        ...prev,
+        [messageId]: {
+          ...current,
+          loading: false,
+        },
+      }
+    })
+  }
+
+  const handlePreferImageResponse = (
+    messageId: string,
+    choice: 'original' | 'variant',
+    messageContent: string,
+    originalSrc: string,
+    variantSrc: string,
+    prompt: string,
+    options?: {
+      closeOverlay?: boolean
+    },
+  ) => {
+    const stableKey = getImageVariantContentKey(messageContent)
+
+    setImageVariantRecords((prev) => ({
+      ...prev,
+      [stableKey]: {
+        preferred: choice,
+        originalSrc,
+        variantSrc,
+        prompt,
+        updatedAt: new Date().toISOString(),
+      },
+    }))
+
+    setImageComparisons((prev) => ({
+      ...prev,
+      [messageId]: {
+        originalSrc,
+        variantSrc,
+        prompt,
+        loading: false,
+        preferred: choice,
+      },
+    }))
+
+    if (options?.closeOverlay !== false) {
+      setActiveImageSelectionId(null)
+    }
+  }
+
+  const activeBranchGeneratingId = useMemo(() => {
+    const entry = Object.entries(branchComparisons).find(([, value]) => value.loading)
+    return entry?.[0] || null
+  }, [branchComparisons])
+
+  const activeImageVariantGeneratingId = useMemo(() => {
+    const entry = Object.entries(imageComparisons).find(([, value]) => value.loading)
+    return entry?.[0] || null
+  }, [imageComparisons])
+
+  const isSecondaryResponseGenerating =
+    Boolean(activeBranchGeneratingId) || Boolean(activeImageVariantGeneratingId)
+
+  const isPrimaryGeneratingOtherConversation =
+    isGenerating && activeConversationId !== generatingConversationId
+
   const isStopState =
-    isGenerating && activeConversationId === generatingConversationId
+    (isGenerating && activeConversationId === generatingConversationId) ||
+    isSecondaryResponseGenerating
 
   const handleComposerSendOrStop = () => {
-    if (isGenerating && activeConversationId !== generatingConversationId) {
+    if (isPrimaryGeneratingOtherConversation && !isSecondaryResponseGenerating) {
       return
     }
 
     if (isStopState) {
+      if (activeBranchGeneratingId) {
+        handleStopBranchResponse(activeBranchGeneratingId)
+        return
+      }
+
+      if (activeImageVariantGeneratingId) {
+        handleStopImageVariantResponse(activeImageVariantGeneratingId)
+        return
+      }
+
       setPinPromptDuringGeneration(false)
       void onSendOrStop(draft, selectedImageFile, previewImageUrl)
       return
@@ -3209,12 +4434,32 @@ function ChatWorkspace({
       clearSelectedImage()
     }
 
+    if (typeof window !== 'undefined') {
+      const shouldDismissKeyboard =
+        window.matchMedia('(max-width: 900px)').matches ||
+        window.matchMedia('(pointer: coarse)').matches
+      if (shouldDismissKeyboard) {
+        composerTextareaRef.current?.blur()
+        const activeElement = document.activeElement
+        if (activeElement instanceof HTMLElement) {
+          activeElement.blur()
+        }
+      }
+    }
+
     void onSendOrStop(draftSnapshot, imageFile, imageUrl)
 
   }
 
   const groupedConversations = useMemo(() => {
     const now = new Date()
+    const toConversationTimestamp = (conversation: Conversation) =>
+      conversation.last_used_at || conversation.created_at
+    const sortedConversations = [...conversations].sort(
+      (a, b) =>
+        new Date(toConversationTimestamp(b)).getTime() -
+        new Date(toConversationTimestamp(a)).getTime(),
+    )
     const buckets: Record<ConversationGroupKey, Conversation[]> = {
       today: [],
       yesterday: [],
@@ -3222,8 +4467,8 @@ function ChatWorkspace({
       older: [],
     }
 
-    conversations.forEach((conversation) => {
-      const groupKey = getConversationGroupKey(conversation.created_at, now)
+    sortedConversations.forEach((conversation) => {
+      const groupKey = getConversationGroupKey(toConversationTimestamp(conversation), now)
       buckets[groupKey].push(conversation)
     })
 
@@ -3479,12 +4724,159 @@ function ChatWorkspace({
             <div className={`message-list ${pinPromptDuringGeneration && isGenerating && activeConversationId === generatingConversationId ? 'prompt-pin-active' : ''}`}>
               {(() => {
                 const promptImageCursor: Record<string, number> = {}
+                const seenAssistantSignatures = new Set<string>()
+                const seenAssistantBaseSignatures = new Set<string>()
+                const seenTurnSignatures = new Set<string>()
+                const seenTurnBaseSignatures = new Set<string>()
+                const seenRenderedPromptSignatures = new Set<string>()
+                let lastRenderedTurnPrompt = ''
+                let lastRenderedTurnAssistantBase = ''
+                let pendingDuplicateAssistantBase = ''
+
+                const getAssistantSignature = (candidate: ChatMessage) => {
+                  if (candidate.role !== 'assistant') return ''
+
+                  const candidateParsed = parseMessageContent(candidate.content)
+                  if (candidateParsed.imageDataUrl) {
+                    const candidateImageComparison = imageComparisons[candidate.id]
+                    const candidateImageVariantRecord =
+                      imageVariantRecords[getImageVariantContentKey(candidate.content)]
+                    const candidateVariantSrc =
+                      candidateImageComparison?.variantSrc ||
+                      candidateImageVariantRecord?.variantSrc ||
+                      inferredImageTurnMerges.variantByAssistantId[candidate.id] ||
+                      persistedImageVariantByParentId[candidate.id] ||
+                      ''
+                    const candidateImageChoice =
+                      candidateImageComparison?.preferred ||
+                      candidateImageVariantRecord?.preferred ||
+                      'original'
+                    const candidateEffectiveImage =
+                      candidateImageChoice === 'variant' && candidateVariantSrc
+                        ? candidateVariantSrc
+                        : candidateParsed.imageDataUrl
+
+                    return candidateEffectiveImage
+                      ? `image::${candidateEffectiveImage.trim()}`
+                      : ''
+                  }
+
+                  const candidateBranchComparison = branchComparisons[candidate.id]
+                  const candidateStableRecord =
+                    branchPreferenceRecords[
+                      getBranchPreferenceContentKey(candidateParsed.text)
+                    ]
+                  const candidatePersistedBranch =
+                    persistedBranchContentByParentId[candidate.id] || ''
+                  const candidateBranchContent =
+                    candidateBranchComparison?.branchContent ||
+                    candidateStableRecord?.branchContent ||
+                    candidatePersistedBranch ||
+                    ''
+                  const candidateChoice =
+                    candidateBranchComparison?.preferred ||
+                    candidateStableRecord?.preferred ||
+                    'original'
+                  const candidateEffectiveText =
+                    candidateChoice === 'branch' && candidateBranchContent
+                      ? candidateBranchContent
+                      : candidateParsed.text
+
+                  const normalized = cleanAssistantOutput(candidateEffectiveText)
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase()
+                  return normalized ? `text::${normalized}` : ''
+                }
+
+                const getAssistantBaseSignature = (candidate: ChatMessage) => {
+                  if (candidate.role !== 'assistant') return ''
+                  const parsed = parseMessageContent(candidate.content)
+
+                  if (parsed.imageDataUrl) {
+                    return `image::${parsed.imageDataUrl.trim()}`
+                  }
+
+                  const normalized = cleanAssistantOutput(parsed.text)
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase()
+                  return normalized ? `text::${normalized}` : ''
+                }
+
                 return visibleMessages.map((message, index) => {
+                  if (inferredImageTurnMerges.suppressedMessageIds.has(message.id)) {
+                    return null
+                  }
+
                   const parsedContent = parseMessageContent(message.content)
+
+                  const messageBaseAssistantSignature =
+                    message.role === 'assistant' ? getAssistantBaseSignature(message) : ''
+
+                  if (message.role === 'assistant' && pendingDuplicateAssistantBase) {
+                    if (messageBaseAssistantSignature === pendingDuplicateAssistantBase) {
+                      pendingDuplicateAssistantBase = ''
+                      return null
+                    }
+                  }
+
+                  if (message.role === 'user') {
+                    const promptSignature = parsedContent.imagePrompt
+                      .replace(/\s+/g, ' ')
+                      .trim()
+                      .toLowerCase()
+
+                    let nextAssistantBaseSignature = ''
+                    for (let nextIndex = index + 1; nextIndex < visibleMessages.length; nextIndex += 1) {
+                      const candidate = visibleMessages[nextIndex]
+                      if (candidate.role === 'user') break
+                      if (candidate.role !== 'assistant') continue
+                      const candidateSignature = getAssistantBaseSignature(candidate)
+                      if (candidateSignature) {
+                        nextAssistantBaseSignature = candidateSignature
+                        break
+                      }
+                    }
+
+                    if (
+                      promptSignature &&
+                      nextAssistantBaseSignature &&
+                      lastRenderedTurnPrompt === promptSignature &&
+                      lastRenderedTurnAssistantBase === nextAssistantBaseSignature
+                    ) {
+                      pendingDuplicateAssistantBase = nextAssistantBaseSignature
+                      return null
+                    }
+
+                    if (promptSignature && nextAssistantBaseSignature) {
+                      lastRenderedTurnPrompt = promptSignature
+                      lastRenderedTurnAssistantBase = nextAssistantBaseSignature
+                    }
+
+                    if (
+                      promptSignature &&
+                      !nextAssistantBaseSignature &&
+                      seenRenderedPromptSignatures.has(promptSignature) &&
+                      !isGenerating
+                    ) {
+                      return null
+                    }
+
+                    if (promptSignature) {
+                      seenRenderedPromptSignatures.add(promptSignature)
+                    }
+                  }
+
                   const isPendingAssistant =
                     message.role === 'assistant' &&
                     !message.content.trim() &&
                     isGenerating &&
+                    index === visibleMessages.length - 1
+                  const isAssistantResponseInProgress =
+                    message.role === 'assistant' &&
+                    isGenerating &&
+                    generatingConversationId === message.conversation_id &&
                     index === visibleMessages.length - 1
                   const userImageTagMatch =
                     message.role === 'user'
@@ -3514,13 +4906,89 @@ function ChatWorkspace({
                       : ''
                   const assistantDisplayContent =
                     message.role === 'assistant' ? parsedContent.text : ''
+                  const branchComparison = branchComparisons[message.id]
+                  const stableBranchPreferenceRecord =
+                    message.role === 'assistant'
+                      ? branchPreferenceRecords[
+                          getBranchPreferenceContentKey(parsedContent.text)
+                        ]
+                      : null
+                  const persistedBranchContentForMessage =
+                    message.role === 'assistant'
+                      ? persistedBranchContentByParentId[message.id] || ''
+                      : ''
+                  const responseBranchContentForMessage =
+                    branchComparison?.branchContent ||
+                    stableBranchPreferenceRecord?.branchContent ||
+                    persistedBranchContentForMessage ||
+                    ''
+                  const hasBranchForMessage =
+                    message.role === 'assistant' &&
+                    Boolean(responseBranchContentForMessage.trim())
+                  const preferredResponseForMessage: 'original' | 'branch' =
+                    branchComparison?.preferred ||
+                    stableBranchPreferenceRecord?.preferred ||
+                    'original'
+                  const responseOriginalContentForMessage =
+                    branchComparison?.originalContent ||
+                    stableBranchPreferenceRecord?.originalContent ||
+                    assistantDisplayContent
+                  const effectiveAssistantDisplayContent =
+                    message.role === 'assistant'
+                      ? preferredResponseForMessage === 'branch' && responseBranchContentForMessage
+                        ? responseBranchContentForMessage
+                        : assistantDisplayContent
+                      : ''
                   const assistantImageSrc =
                     message.role === 'assistant' ? parsedContent.imageDataUrl : undefined
-                  const hasAssistantImage = Boolean(assistantImageSrc)
+                  const imageComparison = imageComparisons[message.id]
+                  const imageVariantRecord =
+                    message.role === 'assistant' && assistantImageSrc
+                      ? imageVariantRecords[getImageVariantContentKey(message.content)]
+                      : null
+                  const imageVariantSrc =
+                    imageComparison?.variantSrc || imageVariantRecord?.variantSrc || ''
+                  const inferredImageVariantSrc =
+                    message.role === 'assistant'
+                      ? inferredImageTurnMerges.variantByAssistantId[message.id] || ''
+                      : ''
+                  const persistedImageVariantSrc =
+                    message.role === 'assistant'
+                      ? persistedImageVariantByParentId[message.id] || ''
+                      : ''
+                  const imageOriginalSrc =
+                    imageComparison?.originalSrc ||
+                    imageVariantRecord?.originalSrc ||
+                    assistantImageSrc ||
+                    ''
+                  const imagePreferred =
+                    imageComparison?.preferred || imageVariantRecord?.preferred || 'original'
+                  const imagePrompt =
+                    imageComparison?.prompt ||
+                    imageVariantRecord?.prompt ||
+                    parsedContent.imagePrompt ||
+                    ''
+                  const hasImageVariant = Boolean((imageVariantSrc || inferredImageVariantSrc || persistedImageVariantSrc).trim())
+                  const effectiveVariantSrc = imageVariantSrc || inferredImageVariantSrc || persistedImageVariantSrc
+                  const effectiveAssistantImageSrc =
+                    imagePreferred === 'variant' && effectiveVariantSrc
+                      ? effectiveVariantSrc
+                      : assistantImageSrc
+                  const hasAssistantImage = Boolean(effectiveAssistantImageSrc)
+                  const isAssistantImageLoadingSlot =
+                    message.role === 'assistant' && parsedContent.isImageLoading === true
+                  const isVariantOnlyRootImage =
+                    message.role === 'assistant' &&
+                    !message.parent_id &&
+                    Boolean(assistantImageSrc) &&
+                    imageVariantRelation.variantOnlySet.has((assistantImageSrc || '').trim()) &&
+                    !hasImageVariant
                   const messageModel =
                     message.role === 'assistant'
-                      ? getMessageModel(message) || activeConversationModel
+                      ? inferAssistantModelFromThread(visibleMessages, index)
                       : null
+                  const messageFeedback =
+                    message.role === 'assistant' ? getAssistantFeedback(message) : null
                   const pendingStatusText =
                     imageCreateStatus === 'created'
                       ? 'Created'
@@ -3533,9 +5001,85 @@ function ChatWorkspace({
                     isPendingAssistant &&
                     (imageCreateStatus === 'creating' || imageCreateStatus === 'created')
                   const messageModelLabel =
-                    message.role === 'assistant' && hasAssistantImage
-                      ? 'SD-Turbo'
-                      : MODEL_ENGINE_LABELS[messageModel || activeConversationModel]
+                    message.role === 'assistant'
+                      ? MODEL_ENGINE_LABELS[
+                          messageModel || (hasAssistantImage ? 'sd-turbo' : 'llama')
+                        ]
+                      : MODEL_ENGINE_LABELS.llama
+
+                  if (message.role === 'assistant') {
+                    if (isVariantOnlyRootImage) {
+                      return null
+                    }
+
+                    const assistantBaseSignature = getAssistantBaseSignature(message)
+                    if (
+                      assistantBaseSignature &&
+                      seenAssistantBaseSignatures.has(assistantBaseSignature)
+                    ) {
+                      return null
+                    }
+                    if (assistantBaseSignature) {
+                      seenAssistantBaseSignatures.add(assistantBaseSignature)
+                    }
+
+                    const assistantSignature = getAssistantSignature(message)
+                    if (assistantSignature && seenAssistantSignatures.has(assistantSignature)) {
+                      return null
+                    }
+                    if (assistantSignature) {
+                      seenAssistantSignatures.add(assistantSignature)
+                    }
+                  }
+
+                  if (message.role === 'user') {
+                    const promptSignature = parsedContent.imagePrompt
+                      .replace(/\s+/g, ' ')
+                      .trim()
+                      .toLowerCase()
+
+                    if (promptSignature) {
+                      let nextAssistantSignature = ''
+                      for (let nextIndex = index + 1; nextIndex < visibleMessages.length; nextIndex += 1) {
+                        const candidate = visibleMessages[nextIndex]
+                        if (inferredImageTurnMerges.suppressedMessageIds.has(candidate.id)) continue
+                        if (candidate.role === 'user') break
+                        const candidateSignature = getAssistantSignature(candidate)
+                        if (candidateSignature) {
+                          nextAssistantSignature = candidateSignature
+                          break
+                        }
+                      }
+
+                      if (nextAssistantSignature) {
+                        const turnSignature = `${promptSignature}::${nextAssistantSignature}`
+                        if (seenTurnSignatures.has(turnSignature)) {
+                          return null
+                        }
+                        seenTurnSignatures.add(turnSignature)
+                      }
+
+                      let nextAssistantBaseSignature = ''
+                      for (let nextIndex = index + 1; nextIndex < visibleMessages.length; nextIndex += 1) {
+                        const candidate = visibleMessages[nextIndex]
+                        if (inferredImageTurnMerges.suppressedMessageIds.has(candidate.id)) continue
+                        if (candidate.role === 'user') break
+                        const candidateSignature = getAssistantBaseSignature(candidate)
+                        if (candidateSignature) {
+                          nextAssistantBaseSignature = candidateSignature
+                          break
+                        }
+                      }
+
+                      if (nextAssistantBaseSignature) {
+                        const turnBaseSignature = `${promptSignature}::${nextAssistantBaseSignature}`
+                        if (seenTurnBaseSignatures.has(turnBaseSignature)) {
+                          return null
+                        }
+                        seenTurnBaseSignatures.add(turnBaseSignature)
+                      }
+                    }
+                  }
 
                   return (
                     <article
@@ -3568,17 +5112,19 @@ function ChatWorkspace({
                               )
                             ) : hasAssistantImage ? (
                               <div className="message-image-card assistant-generated-image-card">
-                                <img
-                                  src={assistantImageSrc}
+                                <ProgressiveImage
+                                  src={effectiveAssistantImageSrc}
                                   alt={parsedContent.imagePrompt || 'Generated image'}
                                   className="message-image assistant-generated-image"
                                   onClick={() => {
-                                    if (!assistantImageSrc) return
-                                    setPreviewImageUrl(assistantImageSrc)
+                                    if (!effectiveAssistantImageSrc) return
+                                    setPreviewImageUrl(effectiveAssistantImageSrc)
                                     setShowImageModal(true)
                                   }}
                                 />
                               </div>
+                            ) : isAssistantImageLoadingSlot ? (
+                              <ImageSlotLoader />
                             ) : (
                               <ReactMarkdown
                                 remarkPlugins={[remarkGfm]}
@@ -3609,7 +5155,7 @@ function ChatWorkspace({
                                   },
                                 }}
                               >
-                                {cleanAssistantOutput(assistantDisplayContent)}
+                                {cleanAssistantOutput(effectiveAssistantDisplayContent)}
                               </ReactMarkdown>
                             )}
                           </div>
@@ -3622,7 +5168,7 @@ function ChatWorkspace({
                         >
                           {hasUserImage ? (
                             <div className="message-image-card">
-                              <img
+                              <ProgressiveImage
                                 src={userImageSrc}
                                 alt="Uploaded image"
                                 className="message-image"
@@ -3641,24 +5187,26 @@ function ChatWorkspace({
                           )}
                         </div>
                       )}
-                    {!isPendingAssistant && message.role === 'assistant' && (
+                    {!isAssistantResponseInProgress && message.role === 'assistant' && (
                       <div className="message-actions message-actions-outside">
-                        <button
-                          type="button"
-                          className="ghost-button action-btn message-action-icon"
-                          onClick={() =>
-                            void handleRegenerateMessage(
-                              message.id,
-                              getMessageModel(message),
-                              message.content,
-                              message.created_at,
-                            )
-                          }
-                          title="Regenerate"
-                          aria-label="Regenerate"
-                        >
-                          <RotateCcw size={16} />
-                        </button>
+                        {!((hasAssistantImage && hasImageVariant) || (!hasAssistantImage && hasBranchForMessage)) && (
+                          <button
+                            type="button"
+                            className="ghost-button action-btn message-action-icon"
+                            onClick={() =>
+                              void handleRegenerateMessage(
+                                message.id,
+                                getMessageModel(message),
+                                message.content,
+                                message.created_at,
+                              )
+                            }
+                            title="Regenerate"
+                            aria-label="Regenerate"
+                          >
+                            <RotateCcw size={16} />
+                          </button>
+                        )}
                         {!hasAssistantImage && (
                           <button
                             type="button"
@@ -3677,12 +5225,50 @@ function ChatWorkspace({
                             {copiedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
                           </button>
                         )}
+                        {message.role === 'assistant' && (
+                          <>
+                            {(messageFeedback === null || messageFeedback === 'like') && (
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon message-feedback-button ${
+                                  messageFeedback === 'like' ? 'active-like' : ''
+                                }`}
+                                onClick={() => void handleMessageFeedback(message, 'like')}
+                                title="Like"
+                                aria-label="Like"
+                                disabled={feedbackSavingMessageId === message.id}
+                              >
+                                <ThumbsUp
+                                  size={16}
+                                  fill={messageFeedback === 'like' ? 'currentColor' : 'none'}
+                                />
+                              </button>
+                            )}
+                            {(messageFeedback === null || messageFeedback === 'dislike') && (
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon message-feedback-button ${
+                                  messageFeedback === 'dislike' ? 'active-dislike' : ''
+                                }`}
+                                onClick={() => void handleMessageFeedback(message, 'dislike')}
+                                title="Dislike"
+                                aria-label="Dislike"
+                                disabled={feedbackSavingMessageId === message.id}
+                              >
+                                <ThumbsDown
+                                  size={16}
+                                  fill={messageFeedback === 'dislike' ? 'currentColor' : 'none'}
+                                />
+                              </button>
+                            )}
+                          </>
+                        )}
                         {hasAssistantImage ? (
                           <button
                             type="button"
                             className="ghost-button action-btn message-action-icon"
                             onClick={() =>
-                              handleDownloadAssistantImage(assistantImageSrc)
+                              handleDownloadAssistantImage(effectiveAssistantImageSrc)
                             }
                             title="Download image"
                             aria-label="Download image"
@@ -3693,7 +5279,7 @@ function ChatWorkspace({
                           <button
                             type="button"
                             className={`ghost-button action-btn message-action-icon ${readingMessageId === message.id ? 'reading' : ''}`}
-                            onClick={() => handleReadAloud(message.id, assistantDisplayContent)}
+                            onClick={() => handleReadAloud(message.id, effectiveAssistantDisplayContent)}
                             title={readingMessageId === message.id ? 'Reading...' : 'Read aloud'}
                             aria-label={readingMessageId === message.id ? 'Reading' : 'Read aloud'}
                           >
@@ -3712,7 +5298,7 @@ function ChatWorkspace({
                               message.role === 'assistant'
                                 ? assistantDisplayContent
                                 : parsedContent.text,
-                              hasAssistantImage ? assistantImageSrc : undefined,
+                              hasAssistantImage ? effectiveAssistantImageSrc : undefined,
                             )
                           }
                           title="Share"
@@ -3720,6 +5306,122 @@ function ChatWorkspace({
                         >
                           <Share2 size={16} />
                         </button>
+                        {hasAssistantImage &&
+                          (hasImageVariant ? (
+                            <>
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon ${imagePreferred === 'original' ? 'branch-nav-active' : ''}`}
+                                onClick={() =>
+                                  handlePreferImageResponse(
+                                    message.id,
+                                    'original',
+                                    message.content,
+                                    imageOriginalSrc,
+                                    effectiveVariantSrc,
+                                    imagePrompt,
+                                    { closeOverlay: false },
+                                  )
+                                }
+                                title="Show Response 1"
+                                aria-label="Show Response 1"
+                              >
+                                <ChevronLeft size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon ${imagePreferred === 'variant' ? 'branch-nav-active' : ''}`}
+                                onClick={() =>
+                                  handlePreferImageResponse(
+                                    message.id,
+                                    'variant',
+                                    message.content,
+                                    imageOriginalSrc,
+                                    effectiveVariantSrc,
+                                    imagePrompt,
+                                    { closeOverlay: false },
+                                  )
+                                }
+                                title="Show Response 2"
+                                aria-label="Show Response 2"
+                              >
+                                <ChevronRight size={16} />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`ghost-button action-btn message-action-icon ${imageComparisons[message.id]?.loading ? 'reading' : ''}`}
+                              onClick={() =>
+                                void handleGenerateImageVariant(message.id, message.content)
+                              }
+                              title="Generate Response 2"
+                              aria-label="Generate Response 2"
+                              disabled={imageComparisons[message.id]?.loading}
+                            >
+                              {imageComparisons[message.id]?.loading ? (
+                                <Loader2 size={16} className="action-icon-spin" />
+                              ) : (
+                                <GitBranch size={16} />
+                              )}
+                            </button>
+                          ))}
+                        {!hasAssistantImage &&
+                          (hasBranchForMessage ? (
+                            <>
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon ${preferredResponseForMessage === 'original' ? 'branch-nav-active' : ''}`}
+                                onClick={() =>
+                                  handlePreferResponse(message.id, 'original', {
+                                    closeOverlay: false,
+                                    originalContent: responseOriginalContentForMessage,
+                                    branchContent: responseBranchContentForMessage,
+                                  })
+                                }
+                                title="Show Response 1"
+                                aria-label="Show Response 1"
+                              >
+                                <ChevronLeft size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon ${preferredResponseForMessage === 'branch' ? 'branch-nav-active' : ''}`}
+                                onClick={() =>
+                                  handlePreferResponse(message.id, 'branch', {
+                                    closeOverlay: false,
+                                    originalContent: responseOriginalContentForMessage,
+                                    branchContent: responseBranchContentForMessage,
+                                  })
+                                }
+                                title="Show Response 2"
+                                aria-label="Show Response 2"
+                              >
+                                <ChevronRight size={16} />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`ghost-button action-btn message-action-icon ${branchComparisons[message.id]?.loading ? 'reading' : ''}`}
+                              onClick={() =>
+                                void handleBranchResponse(
+                                  message.id,
+                                  getMessageModel(message),
+                                  message.content,
+                                )
+                              }
+                              title="Branch response"
+                              aria-label="Branch response"
+                              disabled={branchComparisons[message.id]?.loading}
+                            >
+                              {branchComparisons[message.id]?.loading ? (
+                                <Loader2 size={16} className="action-icon-spin" />
+                              ) : (
+                                <GitBranch size={16} />
+                              )}
+                            </button>
+                          ))}
                         <span className="message-model-pill" title="Model used">
                           <Cpu size={16} />
                           {messageModelLabel}
@@ -3759,15 +5461,24 @@ function ChatWorkspace({
           {notice && <p className="notice-text">{notice}</p>}
           {!selectedImageFile && (
             <div className="composer-options">
-              <CustomDropdown
-                value={selectedModel}
-                options={COMPOSER_MODEL_OPTIONS.map((model) => ({
-                  value: model,
-                  label: COMPOSER_MODEL_LABELS[model],
-                }))}
-                onChange={setSelectedModel}
-                triggerClassName="composer-select model-select-trigger composer-model-trigger"
-              />
+              <div className="composer-model-buttons" role="tablist" aria-label="Choose model">
+                {COMPOSER_MODEL_OPTIONS.map((model) => {
+                  const active = selectedModel === model
+                  return (
+                    <button
+                      key={model}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      aria-pressed={active}
+                      className={`composer-model-button ${active ? 'active' : ''}`}
+                      onClick={() => setSelectedModel(model)}
+                    >
+                      {COMPOSER_MODEL_LABELS[model]}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
           {selectedImageFile && previewImageUrl && (
@@ -3890,7 +5601,7 @@ function ChatWorkspace({
                   event.preventDefault()
                   void handleComposerSendOrStop()
                 }}
-                disabled={isGenerating && activeConversationId !== generatingConversationId}
+                disabled={isPrimaryGeneratingOtherConversation && !isSecondaryResponseGenerating}
                 aria-label={isStopState ? 'Stop generation' : 'Send message'}
               >
                 {isStopState ? (
@@ -3902,6 +5613,253 @@ function ChatWorkspace({
             </div>
           </div>
         </footer>
+
+        {activeBranchSelectionId && branchComparisons[activeBranchSelectionId] && (
+          <div className="branch-selection-overlay" role="dialog" aria-modal="true">
+            <div className="branch-selection-shell">
+              <header className="branch-selection-head">
+                <h3>Choose preferred response</h3>
+                <button
+                  type="button"
+                  className="icon-button branch-selection-close"
+                  onClick={() => setActiveBranchSelectionId(null)}
+                  title="Close"
+                  aria-label="Close response comparison"
+                >
+                  <X size={16} />
+                </button>
+              </header>
+              <div className="branch-selection-grid">
+                <article className="branch-compare-card">
+                  <div className="branch-compare-head">Response 1</div>
+                  <div className="branch-compare-body">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code: ({ className, children, ...props }) => {
+                          const code = String(children)
+                          const codeLanguage = className?.replace('language-', '')
+                          const isBlock = Boolean(codeLanguage) || code.includes('\n')
+
+                          if (isBlock) {
+                            return (
+                              <SyntaxHighlighter
+                                language={codeLanguage || 'text'}
+                                style={vscDarkPlus}
+                                showLineNumbers
+                                wrapLongLines
+                                customStyle={{
+                                  margin: '8px 0',
+                                  borderRadius: '10px',
+                                  background: 'var(--code-bg)',
+                                  padding: '12px',
+                                }}
+                              >
+                                {code}
+                              </SyntaxHighlighter>
+                            )
+                          }
+
+                          return (
+                            <code className={className} {...props}>
+                              {children}
+                            </code>
+                          )
+                        },
+                      }}
+                    >
+                      {cleanAssistantOutput(
+                        branchComparisons[activeBranchSelectionId].originalContent || '',
+                      )}
+                    </ReactMarkdown>
+                  </div>
+                  <button
+                    type="button"
+                    className={`ghost-button branch-prefer-button ${branchComparisons[activeBranchSelectionId].preferred === 'original' ? 'active' : ''}`}
+                    onClick={() => handlePreferResponse(activeBranchSelectionId, 'original')}
+                  >
+                    Prefer this
+                  </button>
+                </article>
+
+                <article className="branch-compare-card">
+                  <div className="branch-compare-head">Response 2</div>
+                  <div className="branch-compare-body">
+                    {branchComparisons[activeBranchSelectionId].loading &&
+                    !branchComparisons[activeBranchSelectionId].branchContent ? (
+                      <div className="branch-generating-controls">
+                        <p>Generating response 2...</p>
+                      </div>
+                    ) : (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          code: ({ className, children, ...props }) => {
+                            const code = String(children)
+                            const codeLanguage = className?.replace('language-', '')
+                            const isBlock = Boolean(codeLanguage) || code.includes('\n')
+
+                            if (isBlock) {
+                              return (
+                                <SyntaxHighlighter
+                                  language={codeLanguage || 'text'}
+                                  style={vscDarkPlus}
+                                  showLineNumbers
+                                  wrapLongLines
+                                  customStyle={{
+                                    margin: '8px 0',
+                                    borderRadius: '10px',
+                                    background: 'var(--code-bg)',
+                                    padding: '12px',
+                                  }}
+                                >
+                                  {code}
+                                </SyntaxHighlighter>
+                              )
+                            }
+
+                            return (
+                              <code className={className} {...props}>
+                                {children}
+                              </code>
+                            )
+                          },
+                        }}
+                      >
+                        {cleanAssistantOutput(
+                          branchComparisons[activeBranchSelectionId].branchContent ||
+                            'No branch response yet.',
+                        )}
+                      </ReactMarkdown>
+                    )}
+                  </div>
+                  {branchComparisons[activeBranchSelectionId].loading ? (
+                    <button
+                      type="button"
+                      className="ghost-button branch-prefer-button loading"
+                      onClick={() => handleStopBranchResponse(activeBranchSelectionId)}
+                    >
+                      <Square size={14} />
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`ghost-button branch-prefer-button ${branchComparisons[activeBranchSelectionId].preferred === 'branch' ? 'active' : ''}`}
+                      onClick={() => handlePreferResponse(activeBranchSelectionId, 'branch')}
+                      disabled={!branchComparisons[activeBranchSelectionId].branchContent}
+                    >
+                      Prefer this
+                    </button>
+                  )}
+                </article>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeImageSelectionId && imageComparisons[activeImageSelectionId] && (
+          <div className="branch-selection-overlay" role="dialog" aria-modal="true">
+            <div className="branch-selection-shell">
+              <header className="branch-selection-head">
+                <h3>Choose preferred response</h3>
+                <button
+                  type="button"
+                  className="icon-button branch-selection-close"
+                  onClick={() => setActiveImageSelectionId(null)}
+                  title="Close"
+                  aria-label="Close response comparison"
+                >
+                  <X size={16} />
+                </button>
+              </header>
+              <div className="branch-selection-grid">
+                <article className="branch-compare-card">
+                  <div className="branch-compare-head">Response 1</div>
+                  <div className="branch-compare-body">
+                    {imageComparisons[activeImageSelectionId].originalSrc ? (
+                      <div className="message-image-card assistant-generated-image-card">
+                        <ProgressiveImage
+                          src={imageComparisons[activeImageSelectionId].originalSrc}
+                          alt="Response 1"
+                          className="message-image assistant-generated-image"
+                        />
+                      </div>
+                    ) : (
+                      <p>No image available.</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className={`ghost-button branch-prefer-button ${imageComparisons[activeImageSelectionId].preferred === 'original' ? 'active' : ''}`}
+                    onClick={() =>
+                      handlePreferImageResponse(
+                        activeImageSelectionId,
+                        'original',
+                        activeMessages.find((m) => m.id === activeImageSelectionId)?.content || '',
+                        imageComparisons[activeImageSelectionId].originalSrc,
+                        imageComparisons[activeImageSelectionId].variantSrc,
+                        imageComparisons[activeImageSelectionId].prompt,
+                      )
+                    }
+                  >
+                    Prefer this
+                  </button>
+                </article>
+
+                <article className="branch-compare-card">
+                  <div className="branch-compare-head">Response 2</div>
+                  <div className="branch-compare-body">
+                    {imageComparisons[activeImageSelectionId].loading &&
+                    !imageComparisons[activeImageSelectionId].variantSrc ? (
+                      <div className="branch-generating-controls">
+                        <ImageGenerationPlaceholder status="creating" />
+                      </div>
+                    ) : imageComparisons[activeImageSelectionId].variantSrc ? (
+                      <div className="message-image-card assistant-generated-image-card">
+                        <ProgressiveImage
+                          src={imageComparisons[activeImageSelectionId].variantSrc}
+                          alt="Response 2"
+                          className="message-image assistant-generated-image"
+                        />
+                      </div>
+                    ) : (
+                      <p>No Response 2 image yet.</p>
+                    )}
+                  </div>
+                  {imageComparisons[activeImageSelectionId].loading ? (
+                    <button
+                      type="button"
+                      className="ghost-button branch-prefer-button loading"
+                      onClick={() => handleStopImageVariantResponse(activeImageSelectionId)}
+                    >
+                      <Square size={14} />
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`ghost-button branch-prefer-button ${imageComparisons[activeImageSelectionId].preferred === 'variant' ? 'active' : ''}`}
+                      onClick={() =>
+                        handlePreferImageResponse(
+                          activeImageSelectionId,
+                          'variant',
+                          activeMessages.find((m) => m.id === activeImageSelectionId)?.content || '',
+                          imageComparisons[activeImageSelectionId].originalSrc,
+                          imageComparisons[activeImageSelectionId].variantSrc,
+                          imageComparisons[activeImageSelectionId].prompt,
+                        )
+                      }
+                      disabled={!imageComparisons[activeImageSelectionId].variantSrc}
+                    >
+                      Prefer this
+                    </button>
+                  )}
+                </article>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {pendingDeleteTitle && (
@@ -3946,6 +5904,8 @@ type DashboardProps = {
   voiceLanguage: VoiceLanguage
   readVoiceUri: string
   confirmClearChats: boolean
+  chatExportEnabled: boolean
+  dataAnalyticsEnabled: boolean
   onSavePersonalization: (
     name: string,
     style: ResponseStyle,
@@ -3958,6 +5918,10 @@ type DashboardProps = {
     voiceLanguage: VoiceLanguage,
     readVoiceUri: string,
     confirmClearChats: boolean,
+  ) => void
+  onSavePrivacySettings: (
+    chatExportEnabled: boolean,
+    dataAnalyticsEnabled: boolean,
   ) => void
   onClearChats: () => Promise<void>
   onExportChats: () => void
@@ -3982,8 +5946,11 @@ function Dashboard({
   voiceLanguage,
   readVoiceUri,
   confirmClearChats,
+  chatExportEnabled,
+  dataAnalyticsEnabled,
   onSavePersonalization,
   onSaveExperienceSettings,
+  onSavePrivacySettings,
   onClearChats,
   onExportChats,
   onLogout,
@@ -4011,10 +5978,8 @@ function Dashboard({
   >('main')
   const [themeDraft, setThemeDraft] = useState<ThemeMode>(theme)
   const [readAfterSendDraft, setReadAfterSendDraft] = useState(readAfterSend)
-  const [chatExportEnabled, setChatExportEnabled] = useState(false)
-  const [dataAnalyticsEnabled, setDataAnalyticsEnabled] = useState(false)
-  const [chatExportDraft, setChatExportDraft] = useState(false)
-  const [dataAnalyticsDraft, setDataAnalyticsDraft] = useState(false)
+  const [chatExportDraft, setChatExportDraft] = useState(chatExportEnabled)
+  const [dataAnalyticsDraft, setDataAnalyticsDraft] = useState(dataAnalyticsEnabled)
 
   useEffect(() => {
     setNameDraft(displayName)
@@ -4045,20 +6010,6 @@ function Dashboard({
       setThemeDraft(theme)
     }
   }, [dashboardView, theme])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const storedChatExport = window.localStorage.getItem(`chat-export-enabled:${userId}`)
-    const storedDataAnalytics = window.localStorage.getItem(`data-analytics-enabled:${userId}`)
-    const nextChatExportEnabled = storedChatExport === 'true'
-    const nextDataAnalyticsEnabled = storedDataAnalytics === 'true'
-
-    setChatExportEnabled(nextChatExportEnabled)
-    setDataAnalyticsEnabled(nextDataAnalyticsEnabled)
-    setChatExportDraft(nextChatExportEnabled)
-    setDataAnalyticsDraft(nextDataAnalyticsEnabled)
-  }, [userId])
 
   useEffect(() => {
     if (dashboardView === 'privacy') {
@@ -4251,13 +6202,7 @@ function Dashboard({
   }
 
   const savePrivacyDraft = () => {
-    setChatExportEnabled(chatExportDraft)
-    setDataAnalyticsEnabled(dataAnalyticsDraft)
-
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(`chat-export-enabled:${userId}`, String(chatExportDraft))
-      window.localStorage.setItem(`data-analytics-enabled:${userId}`, String(dataAnalyticsDraft))
-    }
+    onSavePrivacySettings(chatExportDraft, dataAnalyticsDraft)
 
     setDashboardView('main')
   }
@@ -4866,7 +6811,12 @@ function GalleryView({
                 className="gallery-tile"
                 onClick={() => setPreviewImage(item)}
               >
-                <img src={item.src} alt={item.prompt} className="gallery-tile-image" />
+                <ProgressiveImage
+                  src={item.src}
+                  alt={item.prompt}
+                  className="gallery-tile-image"
+                  shellClassName="gallery-tile-image-shell"
+                />
               </button>
             ))}
           </section>
@@ -4918,15 +6868,185 @@ function SharedConversationView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [title, setTitle] = useState('Shared Conversation')
+  const [sharedConversationId, setSharedConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [copiedSharedMessageId, setCopiedSharedMessageId] = useState<string | null>(null)
+  const [sharedFeedbackByMessageId, setSharedFeedbackByMessageId] = useState<
+    Record<string, FeedbackValue>
+  >({})
+  const [sharedFeedbackSavingId, setSharedFeedbackSavingId] = useState<string | null>(null)
   const [readingSharedMessageId, setReadingSharedMessageId] = useState<string | null>(null)
+  const [sharedResponseOverrides, setSharedResponseOverrides] = useState<
+    Record<string, 'original' | 'branch'>
+  >({})
+  const [sharedImageResponseOverrides, setSharedImageResponseOverrides] = useState<
+    Record<string, 'original' | 'variant'>
+  >({})
+  const [sharedNotice, setSharedNotice] = useState('')
+  const sharedNoticeTimerRef = useRef<number | null>(null)
+
+  const showSharedNotice = useCallback((message: string) => {
+    setSharedNotice(message)
+    if (sharedNoticeTimerRef.current) {
+      window.clearTimeout(sharedNoticeTimerRef.current)
+    }
+    sharedNoticeTimerRef.current = window.setTimeout(() => {
+      setSharedNotice('')
+    }, 2200)
+  }, [])
+
+  const sharedBranchPreferenceStorageKey = useMemo(() => {
+    if (!sharedConversationId) return null
+    return `branch-preferences-shared:${sharedConversationId}`
+  }, [sharedConversationId])
+  const sharedBranchPreferenceRecordStorageKey = useMemo(() => {
+    if (!sharedConversationId) return null
+    return `branch-preference-records:${sharedConversationId}`
+  }, [sharedConversationId])
+  const sharedImageVariantRecordStorageKey = useMemo(() => {
+    if (!sharedConversationId) return null
+    return `image-variant-records:${sharedConversationId}`
+  }, [sharedConversationId])
+
+  const sharedBranchPreferences = useMemo(() => {
+    if (!sharedBranchPreferenceStorageKey) return {} as Record<string, 'original' | 'branch'>
+
+    try {
+      const raw = localStorage.getItem(sharedBranchPreferenceStorageKey)
+      if (!raw) return {} as Record<string, 'original' | 'branch'>
+      const parsed = JSON.parse(raw) as Record<string, 'original' | 'branch'>
+      return parsed && typeof parsed === 'object'
+        ? parsed
+        : ({} as Record<string, 'original' | 'branch'>)
+    } catch {
+      return {} as Record<string, 'original' | 'branch'>
+    }
+  }, [sharedBranchPreferenceStorageKey])
+
+  const sharedBranchPreferenceRecords = useMemo(() => {
+    if (!sharedBranchPreferenceRecordStorageKey) return {} as BranchPreferenceRecordMap
+
+    try {
+      const raw = localStorage.getItem(sharedBranchPreferenceRecordStorageKey)
+      if (!raw) return {} as BranchPreferenceRecordMap
+      const parsed = JSON.parse(raw) as BranchPreferenceRecordMap
+      return parsed && typeof parsed === 'object'
+        ? parsed
+        : ({} as BranchPreferenceRecordMap)
+    } catch {
+      return {} as BranchPreferenceRecordMap
+    }
+  }, [sharedBranchPreferenceRecordStorageKey])
+
+  const sharedImageVariantRecords = useMemo(() => {
+    if (!sharedImageVariantRecordStorageKey) return {} as ImageVariantRecordMap
+
+    try {
+      const raw = localStorage.getItem(sharedImageVariantRecordStorageKey)
+      if (!raw) return {} as ImageVariantRecordMap
+      const parsed = JSON.parse(raw) as ImageVariantRecordMap
+      return parsed && typeof parsed === 'object'
+        ? parsed
+        : ({} as ImageVariantRecordMap)
+    } catch {
+      return {} as ImageVariantRecordMap
+    }
+  }, [sharedImageVariantRecordStorageKey])
 
   const visibleMessages = useMemo(() => {
     const normalized = (value: string) =>
       parseMessageContent(value).imagePrompt.replace(/\s+/g, ' ').trim().toLowerCase()
 
+    const assistantById = new Map<string, ChatMessage>()
+    const preferredAssistantByLineage = new Map<string, string>()
+    const assistantVariantsByLineage = new Map<string, ChatMessage[]>()
+
+    messages.forEach((message) => {
+      if (message.role !== 'assistant') return
+      assistantById.set(message.id, message)
+      const lineageId = message.parent_id?.trim() || message.id
+      const existing = assistantVariantsByLineage.get(lineageId)
+      if (existing) {
+        existing.push(message)
+      } else {
+        assistantVariantsByLineage.set(lineageId, [message])
+      }
+    })
+
+    assistantVariantsByLineage.forEach((variants, lineageId) => {
+      if (variants.length === 1) {
+        preferredAssistantByLineage.set(lineageId, variants[0].id)
+        return
+      }
+
+      const originalVariant = variants.find((variant) => variant.id === lineageId) || variants[0]
+      const branchCandidates = variants.filter((variant) => variant.id !== originalVariant.id)
+      const latestBranchVariant =
+        [...branchCandidates].sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )[branchCandidates.length - 1] || null
+
+      const preferred = sharedBranchPreferences[lineageId]
+      if (preferred === 'branch' && latestBranchVariant) {
+        preferredAssistantByLineage.set(lineageId, latestBranchVariant.id)
+      } else {
+        preferredAssistantByLineage.set(lineageId, originalVariant.id)
+      }
+    })
+
     return messages.reduce<ChatMessage[]>((accumulator, message) => {
+      if (message.role === 'assistant') {
+        const previous = accumulator[accumulator.length - 1]
+        if (
+          previous &&
+          previous.role === 'assistant' &&
+          !previous.parent_id &&
+          !message.parent_id
+        ) {
+          return accumulator
+        }
+
+        if (message.parent_id && assistantById.has(message.parent_id)) {
+          return accumulator
+        }
+
+        const parsedAssistant = parseMessageContent(message.content)
+        const stableRecord =
+          sharedBranchPreferenceRecords[getBranchPreferenceContentKey(parsedAssistant.text)]
+
+        // Hide persisted branch variant rows when a preferred branch has already been applied
+        // to the original response, so shared pages show one chosen answer.
+        if (message.parent_id && assistantById.has(message.parent_id)) {
+          const parentMessage = assistantById.get(message.parent_id)
+          const parentParsed = parentMessage ? parseMessageContent(parentMessage.content) : null
+          const parentRecord = parentParsed
+            ? sharedBranchPreferenceRecords[
+                getBranchPreferenceContentKey(parentParsed.text)
+              ]
+            : undefined
+
+          if (
+            parentRecord?.preferred === 'branch' &&
+            parentRecord.branchContent &&
+            cleanAssistantOutput(parentRecord.branchContent).trim() ===
+              cleanAssistantOutput(parsedAssistant.text).trim()
+          ) {
+            return accumulator
+          }
+        }
+
+        const lineageId = message.parent_id?.trim() || message.id
+        const chosenAssistantId = preferredAssistantByLineage.get(lineageId)
+        if (
+          !stableRecord?.preferred &&
+          chosenAssistantId &&
+          chosenAssistantId !== message.id
+        ) {
+          return accumulator
+        }
+      }
+
       const previous = accumulator[accumulator.length - 1]
       if (
         previous &&
@@ -4940,12 +7060,169 @@ function SharedConversationView() {
       accumulator.push(message)
       return accumulator
     }, [])
+  }, [messages, sharedBranchPreferenceRecords, sharedBranchPreferences])
+
+  const sharedBranchContentByParentId = useMemo(() => {
+    const next: Record<string, string> = {}
+
+    messages.forEach((message) => {
+      if (message.role !== 'assistant' || !message.parent_id) return
+      const parsed = parseMessageContent(message.content)
+      const text = cleanAssistantOutput(parsed.text).trim()
+      if (!text) return
+      next[message.parent_id] = text
+    })
+
+    return next
   }, [messages])
+
+  const sharedImageVariantByParentId = useMemo(() => {
+    const next: Record<string, string> = {}
+
+    messages.forEach((message) => {
+      if (message.role !== 'assistant' || !message.parent_id) return
+      const parsed = parseMessageContent(message.content)
+      if (!parsed.imageDataUrl) return
+      next[message.parent_id] = parsed.imageDataUrl
+    })
+
+    return next
+  }, [messages])
+
+  const inferredSharedImageTurnMerges = useMemo(() => {
+    const variantByAssistantId: Record<string, string> = {}
+    const suppressedMessageIds = new Set<string>()
+
+    const turns: Array<{
+      userId: string
+      promptSignature: string
+      assistantId: string
+      assistantImageSrc: string
+    }> = []
+
+    for (let i = 0; i < messages.length; i += 1) {
+      const message = messages[i]
+      if (message.role !== 'user') continue
+
+      const promptSignature = parseMessageContent(message.content)
+        .imagePrompt.replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase()
+
+      if (!promptSignature) continue
+
+      let assistantId = ''
+      let assistantImageSrc = ''
+
+      for (let j = i + 1; j < messages.length; j += 1) {
+        const candidate = messages[j]
+        if (candidate.role === 'user') break
+        if (candidate.role !== 'assistant' || candidate.parent_id) continue
+
+        const parsedCandidate = parseMessageContent(candidate.content)
+        if (parsedCandidate.imageDataUrl) {
+          assistantId = candidate.id
+          assistantImageSrc = parsedCandidate.imageDataUrl
+          break
+        }
+      }
+
+      if (assistantId && assistantImageSrc) {
+        turns.push({
+          userId: message.id,
+          promptSignature,
+          assistantId,
+          assistantImageSrc,
+        })
+      }
+    }
+
+    for (let i = 1; i < turns.length; i += 1) {
+      const previousTurn = turns[i - 1]
+      const currentTurn = turns[i]
+
+      if (
+        previousTurn.promptSignature === currentTurn.promptSignature &&
+        previousTurn.assistantImageSrc !== currentTurn.assistantImageSrc
+      ) {
+        variantByAssistantId[previousTurn.assistantId] = currentTurn.assistantImageSrc
+        suppressedMessageIds.add(currentTurn.userId)
+        suppressedMessageIds.add(currentTurn.assistantId)
+      }
+    }
+
+    return {
+      variantByAssistantId,
+      suppressedMessageIds,
+    }
+  }, [messages])
+
+  const sharedImageVariantRelation = useMemo(() => {
+    const variantOnlySet = new Set<string>()
+    const originalSet = new Set<string>()
+
+    Object.values(sharedImageVariantRecords).forEach((record) => {
+      if (record.originalSrc) {
+        originalSet.add(record.originalSrc.trim())
+      }
+      if (record.variantSrc) {
+        variantOnlySet.add(record.variantSrc.trim())
+      }
+    })
+
+    originalSet.forEach((src) => {
+      variantOnlySet.delete(src)
+    })
+
+    return {
+      variantOnlySet,
+    }
+  }, [sharedImageVariantRecords])
 
   const handleCopySharedMessage = (messageId: string, content: string) => {
     void navigator.clipboard.writeText(content)
     setCopiedSharedMessageId(messageId)
     setTimeout(() => setCopiedSharedMessageId(null), 2000)
+  }
+
+  const getSharedAssistantFeedback = (message: ChatMessage) => {
+    const localValue = sharedFeedbackByMessageId[message.id]
+    if (isFeedbackValue(localValue)) return localValue
+    return isFeedbackValue(message.feedback) ? message.feedback : null
+  }
+
+  const handleSharedMessageFeedback = async (
+    message: ChatMessage,
+    feedback: FeedbackValue,
+  ) => {
+    if (message.role !== 'assistant') return
+    if (!isUuid(message.id)) return
+
+    const previous = getSharedAssistantFeedback(message)
+    setSharedFeedbackByMessageId((prev) => ({
+      ...prev,
+      [message.id]: feedback,
+    }))
+    setSharedFeedbackSavingId(message.id)
+
+    try {
+      await submitMessageFeedback(message.id, feedback)
+      showSharedNotice('Thanks for Feedback')
+    } catch {
+      setSharedFeedbackByMessageId((prev) => {
+        const next = { ...prev }
+        if (previous) {
+          next[message.id] = previous
+        } else {
+          delete next[message.id]
+        }
+        return next
+      })
+    } finally {
+      setSharedFeedbackSavingId((current) =>
+        current === message.id ? null : current,
+      )
+    }
   }
 
   const handleReadSharedMessage = (messageId: string, content: string) => {
@@ -5018,6 +7295,9 @@ function SharedConversationView() {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel()
       }
+      if (sharedNoticeTimerRef.current) {
+        window.clearTimeout(sharedNoticeTimerRef.current)
+      }
     }
   }, [])
 
@@ -5063,6 +7343,7 @@ function SharedConversationView() {
       }
 
       setTitle(conversation.title || 'Shared Conversation')
+      setSharedConversationId(conversation.id)
 
       const { data: sharedMessages, error: messagesError } = await supabase
         .from('messages')
@@ -5108,6 +7389,7 @@ function SharedConversationView() {
         <p className="shared-readonly-note">
           View-only conversation. Replies are disabled for shared links.
         </p>
+        {sharedNotice && <p className="notice-text">{sharedNotice}</p>}
 
         {loading ? (
           <section className="chat-loading-state shared-loading-state" role="status" aria-live="polite">
@@ -5133,22 +7415,283 @@ function SharedConversationView() {
         ) : (
           <div className="shared-message-scroll">
             <div className="message-list">
-              {visibleMessages.map((message) => {
+              {(() => {
+                const seenAssistantSignatures = new Set<string>()
+                const seenAssistantBaseSignatures = new Set<string>()
+                const seenTurnSignatures = new Set<string>()
+                const seenTurnBaseSignatures = new Set<string>()
+                const seenRenderedPromptSignatures = new Set<string>()
+                let lastRenderedTurnPrompt = ''
+                let lastRenderedTurnAssistantBase = ''
+                let pendingDuplicateAssistantBase = ''
+
+                const getSharedAssistantSignature = (candidate: ChatMessage) => {
+                  if (candidate.role !== 'assistant') return ''
+
+                  const candidateParsed = parseMessageContent(candidate.content)
+                  if (candidateParsed.imageDataUrl) {
+                    const imageRecord =
+                      sharedImageVariantRecords[
+                        getImageVariantContentKey(candidate.content)
+                      ]
+                    const imageVariant =
+                      imageRecord?.variantSrc ||
+                      inferredSharedImageTurnMerges.variantByAssistantId[candidate.id] ||
+                      sharedImageVariantByParentId[candidate.id] ||
+                      ''
+                    const imageChoice =
+                      sharedImageResponseOverrides[candidate.id] ||
+                      imageRecord?.preferred ||
+                      'original'
+                    const effectiveImage =
+                      imageChoice === 'variant' && imageVariant
+                        ? imageVariant
+                        : candidateParsed.imageDataUrl
+                    return effectiveImage ? `image::${effectiveImage.trim()}` : ''
+                  }
+
+                  const textRecord =
+                    sharedBranchPreferenceRecords[
+                      getBranchPreferenceContentKey(candidateParsed.text)
+                    ]
+                  const textVariant =
+                    textRecord?.branchContent ||
+                    sharedBranchContentByParentId[candidate.id] ||
+                    ''
+                  const textChoice =
+                    sharedResponseOverrides[candidate.id] ||
+                    textRecord?.preferred ||
+                    'original'
+                  const effectiveText =
+                    textChoice === 'branch' && textVariant
+                      ? textVariant
+                      : candidateParsed.text
+                  const normalized = cleanAssistantOutput(effectiveText)
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase()
+                  return normalized ? `text::${normalized}` : ''
+                }
+
+                const getSharedAssistantBaseSignature = (candidate: ChatMessage) => {
+                  if (candidate.role !== 'assistant') return ''
+                  const parsed = parseMessageContent(candidate.content)
+
+                  if (parsed.imageDataUrl) {
+                    return `image::${parsed.imageDataUrl.trim()}`
+                  }
+
+                  const normalized = cleanAssistantOutput(parsed.text)
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase()
+                  return normalized ? `text::${normalized}` : ''
+                }
+
+                return visibleMessages.map((message, index) => {
+                  if (inferredSharedImageTurnMerges.suppressedMessageIds.has(message.id)) {
+                    return null
+                  }
+
                 const parsedContent = parseMessageContent(message.content)
+
+                const messageBaseAssistantSignature =
+                  message.role === 'assistant' ? getSharedAssistantBaseSignature(message) : ''
+
+                if (message.role === 'assistant' && pendingDuplicateAssistantBase) {
+                  if (messageBaseAssistantSignature === pendingDuplicateAssistantBase) {
+                    pendingDuplicateAssistantBase = ''
+                    return null
+                  }
+                }
+
+                if (message.role === 'user') {
+                  const promptSignature = parsedContent.imagePrompt
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase()
+
+                  let nextAssistantBaseSignature = ''
+                  for (let nextIndex = index + 1; nextIndex < visibleMessages.length; nextIndex += 1) {
+                    const candidate = visibleMessages[nextIndex]
+                    if (inferredSharedImageTurnMerges.suppressedMessageIds.has(candidate.id)) continue
+                    if (candidate.role === 'user') break
+                    if (candidate.role !== 'assistant') continue
+                    const candidateSignature = getSharedAssistantBaseSignature(candidate)
+                    if (candidateSignature) {
+                      nextAssistantBaseSignature = candidateSignature
+                      break
+                    }
+                  }
+
+                  if (
+                    promptSignature &&
+                    nextAssistantBaseSignature &&
+                    lastRenderedTurnPrompt === promptSignature &&
+                    lastRenderedTurnAssistantBase === nextAssistantBaseSignature
+                  ) {
+                    pendingDuplicateAssistantBase = nextAssistantBaseSignature
+                    return null
+                  }
+
+                  if (promptSignature && nextAssistantBaseSignature) {
+                    lastRenderedTurnPrompt = promptSignature
+                    lastRenderedTurnAssistantBase = nextAssistantBaseSignature
+                  }
+
+                  if (
+                    promptSignature &&
+                    !nextAssistantBaseSignature &&
+                    seenRenderedPromptSignatures.has(promptSignature)
+                  ) {
+                    return null
+                  }
+
+                  if (promptSignature) {
+                    seenRenderedPromptSignatures.add(promptSignature)
+                  }
+                }
+
+                const sharedStableBranchPreferenceRecord =
+                  message.role === 'assistant'
+                    ? sharedBranchPreferenceRecords[
+                        getBranchPreferenceContentKey(parsedContent.text)
+                      ]
+                    : null
+                const sharedBranchContent =
+                  message.role === 'assistant'
+                    ? sharedStableBranchPreferenceRecord?.branchContent ||
+                      sharedBranchContentByParentId[message.id] ||
+                      ''
+                    : ''
+                const sharedImageVariantRecord =
+                  message.role === 'assistant' && parsedContent.imageDataUrl
+                    ? sharedImageVariantRecords[getImageVariantContentKey(message.content)]
+                    : null
+                const sharedImageVariantSrc =
+                  message.role === 'assistant'
+                    ? sharedImageVariantRecord?.variantSrc ||
+                      inferredSharedImageTurnMerges.variantByAssistantId[message.id] ||
+                      sharedImageVariantByParentId[message.id] ||
+                      ''
+                    : ''
+                const sharedImageChoice =
+                  message.role === 'assistant'
+                    ? sharedImageResponseOverrides[message.id] ||
+                      sharedImageVariantRecord?.preferred ||
+                      'original'
+                    : 'original'
+                const sharedResponseChoice =
+                  message.role === 'assistant'
+                    ? sharedResponseOverrides[message.id] ||
+                      sharedStableBranchPreferenceRecord?.preferred ||
+                      'original'
+                    : 'original'
                 const assistantDisplayContent =
-                  message.role === 'assistant' ? parsedContent.text : ''
+                  message.role === 'assistant'
+                    ? sharedResponseChoice === 'branch' && sharedBranchContent
+                      ? sharedBranchContent
+                      : parsedContent.text
+                    : ''
                 const assistantImageSrc =
-                  message.role === 'assistant' ? parsedContent.imageDataUrl : undefined
+                  message.role === 'assistant'
+                    ? sharedImageChoice === 'variant' && sharedImageVariantSrc
+                      ? sharedImageVariantSrc
+                      : parsedContent.imageDataUrl
+                    : undefined
                 const hasAssistantImage = Boolean(assistantImageSrc)
+                const hasSharedImageVariant = Boolean(sharedImageVariantSrc.trim())
+                const isSharedVariantOnlyRootImage =
+                  message.role === 'assistant' &&
+                  !message.parent_id &&
+                  Boolean(parsedContent.imageDataUrl) &&
+                  sharedImageVariantRelation.variantOnlySet.has((parsedContent.imageDataUrl || '').trim()) &&
+                  !hasSharedImageVariant
                 const hasUserImage = message.role === 'user' && Boolean(parsedContent.imageDataUrl)
                 const messageModel =
                   message.role === 'assistant'
-                    ? getMessageModel(message)
+                    ? inferAssistantModelFromThread(visibleMessages, index)
                     : null
+                const messageFeedback =
+                  message.role === 'assistant' ? getSharedAssistantFeedback(message) : null
                 const messageModelLabel =
-                  message.role === 'assistant' && hasAssistantImage
-                    ? 'SD-Turbo'
-                    : MODEL_ENGINE_LABELS[messageModel || 'llama']
+                  message.role === 'assistant'
+                    ? MODEL_ENGINE_LABELS[messageModel || (hasAssistantImage ? 'sd-turbo' : 'llama')]
+                    : MODEL_ENGINE_LABELS.llama
+
+                if (message.role === 'assistant') {
+                  if (isSharedVariantOnlyRootImage) {
+                    return null
+                  }
+
+                  const assistantBaseSignature = getSharedAssistantBaseSignature(message)
+                  if (
+                    assistantBaseSignature &&
+                    seenAssistantBaseSignatures.has(assistantBaseSignature)
+                  ) {
+                    return null
+                  }
+                  if (assistantBaseSignature) {
+                    seenAssistantBaseSignatures.add(assistantBaseSignature)
+                  }
+
+                  const assistantSignature = getSharedAssistantSignature(message)
+                  if (assistantSignature && seenAssistantSignatures.has(assistantSignature)) {
+                    return null
+                  }
+                  if (assistantSignature) {
+                    seenAssistantSignatures.add(assistantSignature)
+                  }
+                }
+
+                if (message.role === 'user') {
+                  const promptSignature = parsedContent.imagePrompt
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase()
+
+                  if (promptSignature) {
+                    let nextAssistantSignature = ''
+                    for (let nextIndex = index + 1; nextIndex < visibleMessages.length; nextIndex += 1) {
+                      const candidate = visibleMessages[nextIndex]
+                      if (inferredSharedImageTurnMerges.suppressedMessageIds.has(candidate.id)) continue
+                      if (candidate.role === 'user') break
+                      const candidateSignature = getSharedAssistantSignature(candidate)
+                      if (candidateSignature) {
+                        nextAssistantSignature = candidateSignature
+                        break
+                      }
+                    }
+
+                    if (nextAssistantSignature) {
+                      const turnSignature = `${promptSignature}::${nextAssistantSignature}`
+                      if (seenTurnSignatures.has(turnSignature)) {
+                        return null
+                      }
+                      seenTurnSignatures.add(turnSignature)
+                    }
+
+                    let nextAssistantBaseSignature = ''
+                    for (let nextIndex = index + 1; nextIndex < visibleMessages.length; nextIndex += 1) {
+                      const candidate = visibleMessages[nextIndex]
+                      if (inferredSharedImageTurnMerges.suppressedMessageIds.has(candidate.id)) continue
+                      if (candidate.role === 'user') break
+                      const candidateSignature = getSharedAssistantBaseSignature(candidate)
+                      if (candidateSignature) {
+                        nextAssistantBaseSignature = candidateSignature
+                        break
+                      }
+                    }
+
+                    if (nextAssistantBaseSignature) {
+                      const turnBaseSignature = `${promptSignature}::${nextAssistantBaseSignature}`
+                      if (seenTurnBaseSignatures.has(turnBaseSignature)) {
+                        return null
+                      }
+                      seenTurnBaseSignatures.add(turnBaseSignature)
+                    }
+                  }
+                }
 
                 return (
                   <article
@@ -5165,7 +7708,7 @@ function SharedConversationView() {
                         <div className={`bubble assistant ${hasAssistantImage ? 'with-image' : ''}`}>
                           {hasAssistantImage ? (
                             <div className="message-image-card assistant-generated-image-card">
-                              <img
+                              <ProgressiveImage
                                 src={assistantImageSrc}
                                 alt={parsedContent.imagePrompt || 'Generated image'}
                                 className="message-image assistant-generated-image"
@@ -5210,7 +7753,7 @@ function SharedConversationView() {
                       <div className="bubble user">
                         {hasUserImage ? (
                           <div className="message-image-card">
-                            <img
+                            <ProgressiveImage
                               src={parsedContent.imageDataUrl}
                               alt="Uploaded image"
                               className="message-image"
@@ -5243,6 +7786,44 @@ function SharedConversationView() {
                           {copiedSharedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
                         </button>
                       )}
+                      {message.role === 'assistant' && (
+                        <>
+                          {(messageFeedback === null || messageFeedback === 'like') && (
+                            <button
+                              type="button"
+                              className={`ghost-button action-btn message-action-icon message-feedback-button ${
+                                messageFeedback === 'like' ? 'active-like' : ''
+                              }`}
+                              onClick={() => void handleSharedMessageFeedback(message, 'like')}
+                              title="Like"
+                              aria-label="Like"
+                              disabled={sharedFeedbackSavingId === message.id}
+                            >
+                              <ThumbsUp
+                                size={16}
+                                fill={messageFeedback === 'like' ? 'currentColor' : 'none'}
+                              />
+                            </button>
+                          )}
+                          {(messageFeedback === null || messageFeedback === 'dislike') && (
+                            <button
+                              type="button"
+                              className={`ghost-button action-btn message-action-icon message-feedback-button ${
+                                messageFeedback === 'dislike' ? 'active-dislike' : ''
+                              }`}
+                              onClick={() => void handleSharedMessageFeedback(message, 'dislike')}
+                              title="Dislike"
+                              aria-label="Dislike"
+                              disabled={sharedFeedbackSavingId === message.id}
+                            >
+                              <ThumbsDown
+                                size={16}
+                                fill={messageFeedback === 'dislike' ? 'currentColor' : 'none'}
+                              />
+                            </button>
+                          )}
+                        </>
+                      )}
                       {message.role === 'assistant' &&
                         (hasAssistantImage ? (
                           <>
@@ -5268,6 +7849,38 @@ function SharedConversationView() {
                             >
                               <Share2 size={16} />
                             </button>
+                            {sharedImageVariantSrc && (
+                              <>
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon ${sharedImageChoice === 'original' ? 'branch-nav-active' : ''}`}
+                                  onClick={() =>
+                                    setSharedImageResponseOverrides((prev) => ({
+                                      ...prev,
+                                      [message.id]: 'original',
+                                    }))
+                                  }
+                                  title="Show Response 1"
+                                  aria-label="Show Response 1"
+                                >
+                                  <ChevronLeft size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon ${sharedImageChoice === 'variant' ? 'branch-nav-active' : ''}`}
+                                  onClick={() =>
+                                    setSharedImageResponseOverrides((prev) => ({
+                                      ...prev,
+                                      [message.id]: 'variant',
+                                    }))
+                                  }
+                                  title="Show Response 2"
+                                  aria-label="Show Response 2"
+                                >
+                                  <ChevronRight size={16} />
+                                </button>
+                              </>
+                            )}
                           </>
                         ) : (
                           <button
@@ -5286,6 +7899,38 @@ function SharedConversationView() {
                             )}
                           </button>
                         ))}
+                      {message.role === 'assistant' && !hasAssistantImage && sharedBranchContent && (
+                        <>
+                          <button
+                            type="button"
+                            className={`ghost-button action-btn message-action-icon ${sharedResponseChoice === 'original' ? 'branch-nav-active' : ''}`}
+                            onClick={() =>
+                              setSharedResponseOverrides((prev) => ({
+                                ...prev,
+                                [message.id]: 'original',
+                              }))
+                            }
+                            title="Show Response 1"
+                            aria-label="Show Response 1"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className={`ghost-button action-btn message-action-icon ${sharedResponseChoice === 'branch' ? 'branch-nav-active' : ''}`}
+                            onClick={() =>
+                              setSharedResponseOverrides((prev) => ({
+                                ...prev,
+                                [message.id]: 'branch',
+                              }))
+                            }
+                            title="Show Response 2"
+                            aria-label="Show Response 2"
+                          >
+                            <ChevronRight size={16} />
+                          </button>
+                        </>
+                      )}
                       {message.role === 'assistant' && (
                         <span className="message-model-pill" title="Model used">
                           <Cpu size={16} />
@@ -5295,7 +7940,8 @@ function SharedConversationView() {
                     </div>
                   </article>
                 )
-              })}
+                })
+              })()}
             </div>
           </div>
         )}
@@ -5341,6 +7987,8 @@ function App() {
   const [readVoiceUri, setReadVoiceUri] = useState('default')
   const [suggestionCount, setSuggestionCount] = useState<4 | 6>(4)
   const [confirmClearChats, setConfirmClearChats] = useState(true)
+  const [chatExportEnabled, setChatExportEnabled] = useState(false)
+  const [dataAnalyticsEnabled, setDataAnalyticsEnabled] = useState(false)
   const [imageDataMap, setImageDataMap] = useState<Record<string, string>>({})
   const [imageTagDataMap, setImageTagDataMap] = useState<Record<string, string>>({})
   const [imagePromptDataMap, setImagePromptDataMap] = useState<Record<string, string[]>>({})
@@ -5538,6 +8186,63 @@ function App() {
     await onCopyShareLink()
   }
 
+  const buildUserSettingsPayload = useCallback(
+    (userId: string): UserSettingsRow => ({
+      user_id: userId,
+      display_name: displayName,
+      theme,
+      response_style: responseStyle,
+      prompt_purpose: promptPurpose,
+      enter_to_send: enterToSend,
+      read_after_send: readAfterSend,
+      suggestion_count: suggestionCount,
+      voice_language: voiceLanguage,
+      read_voice_uri: readVoiceUri,
+      confirm_clear_chats: confirmClearChats,
+      chat_export_enabled: chatExportEnabled,
+      data_analytics_enabled: dataAnalyticsEnabled,
+    }),
+    [
+      chatExportEnabled,
+      confirmClearChats,
+      dataAnalyticsEnabled,
+      displayName,
+      enterToSend,
+      promptPurpose,
+      readAfterSend,
+      readVoiceUri,
+      responseStyle,
+      suggestionCount,
+      theme,
+      voiceLanguage,
+    ],
+  )
+
+  const persistUserSettings = useCallback(
+    async (userId: string, overrides?: Partial<UserSettingsRow>) => {
+      if (!supabase) return false
+
+      const basePayload = buildUserSettingsPayload(userId)
+      const payload = {
+        ...basePayload,
+        ...overrides,
+        user_id: userId,
+      }
+
+      const { error: settingsError } = await supabase
+        .from('user_settings')
+        .upsert(payload, { onConflict: 'user_id' })
+
+      if (settingsError) {
+        setError(settingsError.message)
+        return false
+      }
+
+      return true
+    },
+    [buildUserSettingsPayload],
+  )
+
   const onSavePersonalization = (
     name: string,
     style: ResponseStyle,
@@ -5552,6 +8257,11 @@ function App() {
     localStorage.setItem(`display-name:${session.user.id}`, safeName)
     localStorage.setItem(`response-style:${session.user.id}`, style)
     localStorage.setItem(`prompt-purpose:${session.user.id}`, purpose)
+    void persistUserSettings(session.user.id, {
+      display_name: safeName,
+      response_style: style,
+      prompt_purpose: purpose,
+    })
     setPromptCards(pickRandomPrompts(purpose, suggestionCount))
     showNotice('Preferences saved.')
   }
@@ -5585,9 +8295,43 @@ function App() {
       `confirm-clear-chats:${session.user.id}`,
       String(nextConfirmClearChats),
     )
+    void persistUserSettings(session.user.id, {
+      enter_to_send: nextEnterToSend,
+      read_after_send: nextReadAfterSend,
+      suggestion_count: nextSuggestionCount,
+      voice_language: nextVoiceLanguage,
+      read_voice_uri: nextReadVoiceUri,
+      confirm_clear_chats: nextConfirmClearChats,
+    })
 
     setPromptCards(pickRandomPrompts(promptPurpose, nextSuggestionCount))
     showNotice('Experience settings saved.')
+  }
+
+  const onSavePrivacySettings = (
+    nextChatExportEnabled: boolean,
+    nextDataAnalyticsEnabled: boolean,
+  ) => {
+    if (!session?.user) return
+
+    setChatExportEnabled(nextChatExportEnabled)
+    setDataAnalyticsEnabled(nextDataAnalyticsEnabled)
+
+    localStorage.setItem(
+      `chat-export-enabled:${session.user.id}`,
+      String(nextChatExportEnabled),
+    )
+    localStorage.setItem(
+      `data-analytics-enabled:${session.user.id}`,
+      String(nextDataAnalyticsEnabled),
+    )
+
+    void persistUserSettings(session.user.id, {
+      chat_export_enabled: nextChatExportEnabled,
+      data_analytics_enabled: nextDataAnalyticsEnabled,
+    })
+
+    showNotice('Privacy settings saved.')
   }
 
   const activeMessages = useMemo(() => {
@@ -5599,9 +8343,7 @@ function App() {
     if (!activeConversationId) return selectedModel
     const messages = messagesMap[activeConversationId] || []
     for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i]
-      if (message.role !== 'assistant') continue
-      const model = getMessageModel(message)
+      const model = inferAssistantModelFromThread(messages, i)
       if (model) return model
     }
     return selectedModel
@@ -5620,15 +8362,16 @@ function App() {
     } else {
       setTheme('light')
     }
-  }, [session?.user?.id])
+  }, [session?.user?.id, supabase])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('theme-mode', theme)
     if (session?.user?.id) {
       localStorage.setItem(`theme-mode:${session.user.id}`, theme)
+      void persistUserSettings(session.user.id, { theme })
     }
-  }, [theme, session?.user?.id])
+  }, [theme, session?.user?.id, persistUserSettings])
 
   const refreshPromptCards = (purpose = promptPurpose, count = suggestionCount) => {
     setPromptCards(pickRandomPrompts(purpose, count))
@@ -5637,6 +8380,7 @@ function App() {
   useEffect(() => {
     if (!session?.user?.id) return
 
+    let active = true
     const keyPrefix = session.user.id
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
     const storedStyle = localStorage.getItem(`response-style:${keyPrefix}`)
@@ -5647,6 +8391,8 @@ function App() {
     const storedVoiceLanguage = localStorage.getItem(`voice-language:${keyPrefix}`)
     const storedReadVoiceUri = localStorage.getItem(`read-voice-uri:${keyPrefix}`)
     const storedConfirmClear = localStorage.getItem(`confirm-clear-chats:${keyPrefix}`)
+    const storedChatExport = localStorage.getItem(`chat-export-enabled:${keyPrefix}`)
+    const storedDataAnalytics = localStorage.getItem(`data-analytics-enabled:${keyPrefix}`)
 
     setDisplayName(
       storedName ||
@@ -5682,7 +8428,121 @@ function App() {
     setVoiceLanguage(resolvedVoiceLanguage)
     setReadVoiceUri(storedReadVoiceUri || 'default')
     setConfirmClearChats(storedConfirmClear !== 'false')
+    setChatExportEnabled(storedChatExport === 'true')
+    setDataAnalyticsEnabled(storedDataAnalytics === 'true')
     setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
+
+    const loadSettingsFromDb = async () => {
+      if (!supabase) return
+
+      const { data, error: settingsError } = await supabase
+        .from('user_settings')
+        .select(
+          'display_name, theme, response_style, prompt_purpose, enter_to_send, read_after_send, suggestion_count, voice_language, read_voice_uri, confirm_clear_chats, chat_export_enabled, data_analytics_enabled',
+        )
+        .eq('user_id', keyPrefix)
+        .maybeSingle()
+
+      if (!active) return
+      if (settingsError) {
+        setError(settingsError.message)
+        return
+      }
+      if (!data) return
+
+      const dbSettings = data as Omit<UserSettingsRow, 'user_id'>
+
+      if (dbSettings.display_name) {
+        setDisplayName(dbSettings.display_name)
+        localStorage.setItem(`display-name:${keyPrefix}`, dbSettings.display_name)
+      }
+
+      if (
+        dbSettings.response_style === 'balanced' ||
+        dbSettings.response_style === 'concise' ||
+        dbSettings.response_style === 'detailed'
+      ) {
+        setResponseStyle(dbSettings.response_style)
+        localStorage.setItem(`response-style:${keyPrefix}`, dbSettings.response_style)
+      }
+
+      if (
+        dbSettings.prompt_purpose === 'general' ||
+        dbSettings.prompt_purpose === 'coding' ||
+        dbSettings.prompt_purpose === 'business' ||
+        dbSettings.prompt_purpose === 'study' ||
+        dbSettings.prompt_purpose === 'writing'
+      ) {
+        setPromptPurpose(dbSettings.prompt_purpose)
+        localStorage.setItem(`prompt-purpose:${keyPrefix}`, dbSettings.prompt_purpose)
+      }
+
+      if (dbSettings.theme === 'light' || dbSettings.theme === 'dark') {
+        setTheme(dbSettings.theme)
+        localStorage.setItem(`theme-mode:${keyPrefix}`, dbSettings.theme)
+      }
+
+      if (typeof dbSettings.enter_to_send === 'boolean') {
+        setEnterToSend(dbSettings.enter_to_send)
+        localStorage.setItem(`enter-to-send:${keyPrefix}`, String(dbSettings.enter_to_send))
+      }
+
+      if (typeof dbSettings.read_after_send === 'boolean') {
+        setReadAfterSend(dbSettings.read_after_send)
+        localStorage.setItem(
+          `read-after-send:${keyPrefix}`,
+          String(dbSettings.read_after_send),
+        )
+      }
+
+      if (dbSettings.suggestion_count === 4 || dbSettings.suggestion_count === 6) {
+        setSuggestionCount(dbSettings.suggestion_count)
+        localStorage.setItem(
+          `suggestion-count:${keyPrefix}`,
+          String(dbSettings.suggestion_count),
+        )
+      }
+
+      if (dbSettings.voice_language === 'en-US' || dbSettings.voice_language === 'en-GB') {
+        setVoiceLanguage(dbSettings.voice_language)
+        localStorage.setItem(`voice-language:${keyPrefix}`, dbSettings.voice_language)
+      }
+
+      if (dbSettings.read_voice_uri) {
+        setReadVoiceUri(dbSettings.read_voice_uri)
+        localStorage.setItem(`read-voice-uri:${keyPrefix}`, dbSettings.read_voice_uri)
+      }
+
+      if (typeof dbSettings.confirm_clear_chats === 'boolean') {
+        setConfirmClearChats(dbSettings.confirm_clear_chats)
+        localStorage.setItem(
+          `confirm-clear-chats:${keyPrefix}`,
+          String(dbSettings.confirm_clear_chats),
+        )
+      }
+
+      if (typeof dbSettings.chat_export_enabled === 'boolean') {
+        setChatExportEnabled(dbSettings.chat_export_enabled)
+        localStorage.setItem(
+          `chat-export-enabled:${keyPrefix}`,
+          String(dbSettings.chat_export_enabled),
+        )
+      }
+
+      if (typeof dbSettings.data_analytics_enabled === 'boolean') {
+        setDataAnalyticsEnabled(dbSettings.data_analytics_enabled)
+        localStorage.setItem(
+          `data-analytics-enabled:${keyPrefix}`,
+          String(dbSettings.data_analytics_enabled),
+        )
+      }
+    }
+
+    void loadSettingsFromDb()
+
+    return () => {
+      active = false
+    }
   }, [session?.user?.id])
 
   useEffect(() => {
@@ -5762,6 +8622,7 @@ function App() {
         .from('conversations')
         .select('*')
         .eq('user_id', session.user.id)
+        .order('last_used_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
 
       if (loadError) {
@@ -5799,33 +8660,164 @@ function App() {
 
     const conversationId = activeConversationId
     setLoadingConversationId(conversationId)
+    let cancelled = false
 
     const loadMessages = async () => {
+      const textBatchSize = 40
+
+      const mergeAndSortMessages = (left: ChatMessage[], right: ChatMessage[]) => {
+        return [...left, ...right].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        )
+      }
+
       try {
-        const { data, error: loadError } = await supabase
+        let textOffset = 0
+        let accumulatedTextRows: ChatMessage[] = []
+        let firstTextBatchRendered = false
+
+        while (!cancelled) {
+          const { data: textRowsBatch, error: textRowsError } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', conversationId)
+            .not('content', 'ilike', '{"type":"image"%')
+            .order('created_at', { ascending: true })
+            .range(textOffset, textOffset + textBatchSize - 1)
+
+          if (cancelled) return
+          if (textRowsError) {
+            setError(textRowsError.message)
+            return
+          }
+
+          const normalizedTextBatch = normalizeFetchedMessages(
+            (textRowsBatch || []) as ChatMessage[],
+          )
+
+          if (normalizedTextBatch.length === 0) {
+            if (!firstTextBatchRendered) {
+              setMessagesMap((prev) => ({
+                ...prev,
+                [conversationId]: [],
+              }))
+              setLoadingConversationId((current) =>
+                current === conversationId ? null : current,
+              )
+            }
+            break
+          }
+
+          accumulatedTextRows = [...accumulatedTextRows, ...normalizedTextBatch]
+          setMessagesMap((prev) => ({
+            ...prev,
+            [conversationId]: accumulatedTextRows,
+          }))
+
+          if (!firstTextBatchRendered) {
+            firstTextBatchRendered = true
+            setLoadingConversationId((current) =>
+              current === conversationId ? null : current,
+            )
+          }
+
+          if (normalizedTextBatch.length < textBatchSize) {
+            break
+          }
+
+          textOffset += textBatchSize
+        }
+
+        const { data: imageMetaRowsData, error: imageMetaRowsError } = await supabase
           .from('messages')
-          .select('*')
+          .select('id, conversation_id, role, parent_id, branch_id, model, model_used, created_at')
           .eq('conversation_id', conversationId)
+          .eq('role', 'assistant')
+          .ilike('content', '{"type":"image"%')
           .order('created_at', { ascending: true })
 
-        if (loadError) {
-          setError(loadError.message)
+        if (cancelled) return
+
+        if (imageMetaRowsError) {
+          setError(imageMetaRowsError.message)
           return
         }
 
-        setMessagesMap((prev) => ({
-          ...prev,
-          [conversationId]: normalizeFetchedMessages((data || []) as ChatMessage[]),
+        const imagePlaceholderRows = ((imageMetaRowsData || []) as Array<
+          Omit<ChatMessage, 'content'>
+        >).map((row) => ({
+          ...row,
+          content: JSON.stringify({ type: 'image_loading' }),
         }))
+
+        if (imagePlaceholderRows.length > 0) {
+          setMessagesMap((prev) => {
+            const current = prev[conversationId] || []
+            const currentIds = new Set(current.map((message) => message.id))
+            const missingPlaceholders = imagePlaceholderRows.filter(
+              (message) => !currentIds.has(message.id),
+            )
+
+            if (missingPlaceholders.length === 0) {
+              return prev
+            }
+
+            return {
+              ...prev,
+              [conversationId]: mergeAndSortMessages(current, missingPlaceholders),
+            }
+          })
+        }
+
+        const imageIds = imagePlaceholderRows.map((row) => row.id)
+        if (imageIds.length === 0) return
+
+        const imageBatchSize = 8
+        for (let index = 0; index < imageIds.length; index += imageBatchSize) {
+          if (cancelled) return
+
+          const chunk = imageIds.slice(index, index + imageBatchSize)
+          const { data: hydratedRows, error: hydratedRowsError } = await supabase
+            .from('messages')
+            .select('*')
+            .in('id', chunk)
+
+          if (cancelled) return
+          if (hydratedRowsError) {
+            setError(hydratedRowsError.message)
+            return
+          }
+
+          const normalizedHydratedRows = normalizeFetchedMessages(
+            (hydratedRows || []) as ChatMessage[],
+          )
+          const hydratedById = new Map(normalizedHydratedRows.map((row) => [row.id, row]))
+
+          setMessagesMap((prev) => {
+            const current = prev[conversationId] || []
+            return {
+              ...prev,
+              [conversationId]: current.map((message) =>
+                hydratedById.get(message.id) || message,
+              ),
+            }
+          })
+        }
       } finally {
-        setLoadingConversationId((current) =>
-          current === conversationId ? null : current,
-        )
+        if (!cancelled) {
+          setLoadingConversationId((current) =>
+            current === conversationId ? null : current,
+          )
+        }
       }
     }
 
     void loadMessages()
-  }, [activeConversationId, messagesMap, supabase])
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeConversationId, supabase])
 
   const refreshMessages = async (
     conversationId: string,
@@ -5925,46 +8917,94 @@ function App() {
     return fetchedMessages
   }
 
-  const persistModelForLatestAssistantMessage = async (
+  const persistModelForAssistantMessage = async (
     conversationId: string,
     model: AIModel,
+    assistantContent: string,
+    assistantCreatedAt?: string,
   ) => {
     if (!supabase) return
 
-    const { data: latestAssistantRows, error: loadError } = await supabase
-      .from('messages')
-      .select('id')
-      .eq('conversation_id', conversationId)
-      .eq('role', 'assistant')
-      .order('created_at', { ascending: false })
-      .limit(1)
+    const attempts = 20
+    const retryDelayMs = 300
+    const normalizedContent = cleanAssistantOutput(assistantContent).trim()
 
-    if (loadError || !latestAssistantRows || latestAssistantRows.length === 0) {
-      return
-    }
-    const latestAssistantId = latestAssistantRows[0]?.id as string | undefined
-    if (!latestAssistantId) return
-
-    const { error: updateError } = await supabase
-      .from('messages')
-      .update({ model })
-      .eq('id', latestAssistantId)
-
-    if (updateError) {
-      await supabase
-        .from('messages')
-        .update({ model_used: model })
-        .eq('id', latestAssistantId)
+    const getComparableAssistantText = (content: string) => {
+      const parsed = parseMessageContent(content)
+      if (parsed.imageDataUrl) return ''
+      return cleanAssistantOutput(parsed.text || content).trim()
     }
 
-    setMessagesMap((prev) => ({
-      ...prev,
-      [conversationId]: (prev[conversationId] || []).map((message) =>
-        message.id === latestAssistantId
-          ? { ...message, model, model_used: model }
-          : message,
-      ),
-    }))
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      let targetAssistantId: string | undefined
+
+      if (normalizedContent) {
+        const { data: recentAssistantRows, error: matchingError } = await supabase
+          .from('messages')
+          .select('id, created_at, content')
+          .eq('conversation_id', conversationId)
+          .eq('role', 'assistant')
+          .order('created_at', { ascending: false })
+          .limit(60)
+
+        if (!matchingError && recentAssistantRows && recentAssistantRows.length > 0) {
+          const matchingRows = recentAssistantRows.filter((row) => {
+            const candidateText = getComparableAssistantText(String(row.content || ''))
+            return candidateText === normalizedContent
+          })
+
+          if (assistantCreatedAt) {
+            const targetTime = new Date(assistantCreatedAt).getTime()
+            targetAssistantId = [...matchingRows]
+              .sort((a, b) => {
+                const deltaA = Math.abs(new Date(a.created_at as string).getTime() - targetTime)
+                const deltaB = Math.abs(new Date(b.created_at as string).getTime() - targetTime)
+                return deltaA - deltaB
+              })[0]?.id as string | undefined
+          } else {
+            targetAssistantId = matchingRows[0]?.id as string | undefined
+          }
+        }
+      }
+
+      if (targetAssistantId) {
+        const { error: writeBothError } = await supabase
+          .from('messages')
+          .update({ model: model, model_used: model })
+          .eq('id', targetAssistantId)
+
+        if (writeBothError) {
+          const { error: modelOnlyError } = await supabase
+            .from('messages')
+            .update({ model })
+            .eq('id', targetAssistantId)
+
+          if (modelOnlyError) {
+            await supabase
+              .from('messages')
+              .update({ model_used: model })
+              .eq('id', targetAssistantId)
+          }
+        }
+
+        setMessagesMap((prev) => ({
+          ...prev,
+          [conversationId]: (prev[conversationId] || []).map((message) =>
+            message.id === targetAssistantId
+              ? { ...message, model, model_used: model }
+              : message,
+          ),
+        }))
+
+        return
+      }
+
+      if (attempt < attempts - 1) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, retryDelayMs)
+        })
+      }
+    }
   }
 
   const createConversation = async (initialTitle = 'New Chat') => {
@@ -6022,6 +9062,34 @@ function App() {
     })
   }
 
+  const markConversationUsed = (conversationId: string) => {
+    if (!conversationId) return
+
+    const lastUsedAt = new Date().toISOString()
+    setConversations((prev) => {
+      const next = prev.map((item) =>
+        item.id === conversationId
+          ? {
+              ...item,
+              last_used_at: lastUsedAt,
+            }
+          : item,
+      )
+
+      return next.sort(
+        (a, b) =>
+          new Date(b.last_used_at || b.created_at).getTime() -
+          new Date(a.last_used_at || a.created_at).getTime(),
+      )
+    })
+
+    if (!supabase) return
+    void supabase
+      .from('conversations')
+      .update({ last_used_at: lastUsedAt })
+      .eq('id', conversationId)
+  }
+
   const ensureConversation = async (initialTitle?: string) => {
     if (activeConversationId) return activeConversationId
     return createConversation(initialTitle || 'New Chat')
@@ -6056,6 +9124,32 @@ function App() {
       .eq('conversation_id', conversationId)
   }
 
+  const resolvePersistedAssistantParentIdForStream = async (
+    conversationId: string,
+    replaceAssistantMessageId?: string,
+    replaceAssistantContent?: string,
+    replaceAssistantCreatedAt?: string,
+  ) => {
+    if (!supabase || !replaceAssistantMessageId) return null
+    if (isUuid(replaceAssistantMessageId)) return replaceAssistantMessageId
+    if (!replaceAssistantContent) return null
+
+    const { data: fallbackRows } = await supabase
+      .from('messages')
+      .select('id, created_at')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'assistant')
+      .eq('content', replaceAssistantContent)
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    const fallbackId =
+      (fallbackRows || []).find((row) => row.created_at === replaceAssistantCreatedAt)?.id ||
+      fallbackRows?.[0]?.id
+
+    return typeof fallbackId === 'string' && isUuid(fallbackId) ? fallbackId : null
+  }
+
   const sendMessage = async (
     input: string,
     imageFile?: File | null,
@@ -6075,7 +9169,7 @@ function App() {
     const responseModel: AIModel = imageFile
       ? 'blimp'
       : requestedModel === 'image'
-      ? 'image'
+      ? 'sd-turbo'
       : isTextAIModel(requestedModel)
       ? requestedModel
       : 'llama'
@@ -6097,6 +9191,7 @@ function App() {
     }
 
     moveConversationToTop(conversationId)
+    markConversationUsed(conversationId)
     setActiveConversationId(conversationId)
 
     navigate(`/chat/${slugify(promptForRequest)}?c=${conversationId}`)
@@ -6206,6 +9301,8 @@ function App() {
 
     const assistantId = safeId('assistant')
     let assistantBuffer = ''
+    let finalAssistantContent = ''
+    let generationAborted = false
 
     const assistantMessage: ChatMessage = {
       id: assistantId,
@@ -6213,6 +9310,7 @@ function App() {
       role: 'assistant',
       content: '',
       model: responseModel,
+      model_used: responseModel,
       created_at: new Date().toISOString(),
     }
 
@@ -6226,7 +9324,7 @@ function App() {
     setIsGenerating(true)
     setGeneratingConversationId(conversationId)
     setIsAnalyzingImage(Boolean(imageFile))
-    setImageCreateStatus(responseModel === 'image' ? 'creating' : null)
+    setImageCreateStatus(responseModel === 'sd-turbo' ? 'creating' : null)
     setIsThinking(!imageFile)
 
     setScrollAnchorMessageId(isRegenerate ? anchorMessageId || null : userId)
@@ -6236,45 +9334,68 @@ function App() {
 
     try {
       if (imageFile) {
-        await streamImageCompletion(
-          IMAGE_STREAM_API,
-          {
-            user_id: session.user.id,
-            conversation_id: conversationId,
-            prompt: promptForRequest,
-            file: imageFile,
-          },
-          controller.signal,
-          (token) => {
-            if (!hasFirstToken) {
-              hasFirstToken = true
-              setIsThinking(false)
-            }
-            assistantBuffer += token
-            setStreamTick((prev) => prev + 1)
-            setMessagesMap((prev) => ({
-              ...prev,
-              [conversationId]: (prev[conversationId] || []).map((message) =>
-                message.id === assistantId
-                  ? { ...message, content: cleanAssistantOutput(assistantBuffer) }
-                  : message,
-              ),
-            }))
-          },
-          () => {
-            if (hasVisionDone) return
-            hasVisionDone = true
-            setIsAnalyzingImage(false)
-            setIsThinking(true)
-          },
-          () => {
-            setIsGenerating(false)
-            setGeneratingConversationId(null)
-            setIsAnalyzingImage(false)
-            setIsThinking(false)
-          },
+        const resolvedStreamParentId = await resolvePersistedAssistantParentIdForStream(
+          conversationId,
+          replaceAssistantMessageId,
+          replaceAssistantContent,
+          replaceAssistantCreatedAt,
         )
-      } else if (responseModel === 'image') {
+
+        const runImageStream = async (withBranch: boolean) => {
+          await streamImageCompletion(
+            IMAGE_STREAM_API,
+            {
+              user_id: session.user.id,
+              conversation_id: conversationId,
+              prompt: promptForRequest,
+              file: imageFile,
+              branch: withBranch,
+              parent_id: withBranch ? resolvedStreamParentId || undefined : undefined,
+            },
+            controller.signal,
+            (token) => {
+              if (!hasFirstToken) {
+                hasFirstToken = true
+                setIsThinking(false)
+              }
+              assistantBuffer += token
+              finalAssistantContent = cleanAssistantOutput(assistantBuffer)
+              setStreamTick((prev) => prev + 1)
+              setMessagesMap((prev) => ({
+                ...prev,
+                [conversationId]: (prev[conversationId] || []).map((message) =>
+                  message.id === assistantId
+                    ? { ...message, content: cleanAssistantOutput(assistantBuffer) }
+                    : message,
+                ),
+              }))
+            },
+            () => {
+              if (hasVisionDone) return
+              hasVisionDone = true
+              setIsAnalyzingImage(false)
+              setIsThinking(true)
+            },
+            () => {
+              setIsGenerating(false)
+              setGeneratingConversationId(null)
+              setIsAnalyzingImage(false)
+              setIsThinking(false)
+            },
+          )
+        }
+
+        if (resolvedStreamParentId) {
+          try {
+            await runImageStream(true)
+          } catch {
+            // Fallback for image-stream providers that do not yet support branch payload fields.
+            await runImageStream(false)
+          }
+        } else {
+          await runImageStream(false)
+        }
+      } else if (responseModel === 'sd-turbo') {
         setIsThinking(true)
         const generatedBase64 = await generateImageFromPrompt(
           IMAGE_GENERATE_API,
@@ -6297,6 +9418,7 @@ function App() {
           prompt: promptForRequest,
           model: 'sd-turbo',
         })
+        finalAssistantContent = assistantImagePayload
 
         setMessagesMap((prev) => ({
           ...prev,
@@ -6332,6 +9454,7 @@ function App() {
               setIsThinking(false)
             }
             assistantBuffer += token
+            finalAssistantContent = cleanAssistantOutput(assistantBuffer)
             setStreamTick((prev) => prev + 1)
             setMessagesMap((prev) => ({
               ...prev,
@@ -6352,6 +9475,7 @@ function App() {
         )
       }
     } catch (streamError) {
+      generationAborted = streamError instanceof DOMException && streamError.name === 'AbortError'
       if (!(streamError instanceof DOMException && streamError.name === 'AbortError')) {
         setError(
           streamError instanceof Error
@@ -6373,8 +9497,15 @@ function App() {
           originalPromptMessageId,
         )
       }
+      if (!generationAborted && finalAssistantContent.trim()) {
+        await persistModelForAssistantMessage(
+          conversationId,
+          responseModel,
+          finalAssistantContent,
+          assistantMessage.created_at,
+        )
+      }
       await refreshMessages(conversationId, true)
-      await persistModelForLatestAssistantMessage(conversationId, responseModel)
     }
   }
 
@@ -6583,17 +9714,15 @@ function App() {
 
   const onSelectConversation = (conversationId: string) => {
     const selected = conversations.find((conv) => conv.id === conversationId)
-    const modelForConversation =
-      (messagesMap[conversationId] || [])
-        .slice()
-        .reverse()
-        .find((message) => message.role === 'assistant' && getMessageModel(message))
-        ?.model ||
-      (messagesMap[conversationId] || [])
-        .slice()
-        .reverse()
-        .find((message) => message.role === 'assistant' && getMessageModel(message))
-        ?.model_used
+    const conversationMessages = messagesMap[conversationId] || []
+    let modelForConversation: AIModel | null = null
+    for (let i = conversationMessages.length - 1; i >= 0; i -= 1) {
+      const resolvedModel = inferAssistantModelFromThread(conversationMessages, i)
+      if (resolvedModel) {
+        modelForConversation = resolvedModel
+        break
+      }
+    }
     setActiveConversationId(conversationId)
     setScrollAnchorMessageId(null)
     if (!messagesMap[conversationId]) {
@@ -6691,7 +9820,13 @@ function App() {
         <Route
           path="/"
           element={
-            booting ? <div className="screen-loader">Loading...</div> : <LandingPage session={session} />
+            booting ? (
+              <div className="screen-loader">Loading...</div>
+            ) : session ? (
+              <Navigate to="/chat" replace />
+            ) : (
+              <LandingPage session={session} />
+            )
           }
         />
         <Route path="/auth" element={booting ? <div className="screen-loader">Loading...</div> : session ? <Navigate to="/chat" replace /> : <AuthScreen />} />
@@ -6708,6 +9843,7 @@ function App() {
               <Navigate to="/auth" replace />
             ) : (
               <ChatWorkspace
+                currentUserId={session.user.id}
                 conversations={conversations}
                 activeConversationId={activeConversationId}
                 isLoadingConversation={
@@ -6742,6 +9878,7 @@ function App() {
                 onShareMessage={onShareMessage}
                 onShareConversation={onShareConversation}
                 onDeleteConversationRequest={onDeleteConversationRequest}
+                onShowNotice={showNotice}
                 onConfirmDeleteConversation={onConfirmDeleteConversation}
                 onCancelDeleteConversation={onCancelDeleteConversation}
                 onSelectConversation={onSelectConversation}
@@ -6782,8 +9919,11 @@ function App() {
                 voiceLanguage={voiceLanguage}
                 readVoiceUri={readVoiceUri}
                 confirmClearChats={confirmClearChats}
+                chatExportEnabled={chatExportEnabled}
+                dataAnalyticsEnabled={dataAnalyticsEnabled}
                 onSavePersonalization={onSavePersonalization}
                 onSaveExperienceSettings={onSaveExperienceSettings}
+                onSavePrivacySettings={onSavePrivacySettings}
                 onClearChats={onClearChats}
                 onExportChats={onExportChats}
                 onLogout={onLogout}
