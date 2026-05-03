@@ -192,7 +192,7 @@ const IMAGE_GEN_API_BASE =
     'https://valtry-llama-img-gen.hf.space').replace(/\/+$/, '')
 const CODE_RUNNER_API =
   ((import.meta.env.VITE_CODE_RUNNER_STREAM_API as string | undefined) ||
-    'https://code-runner-q5yo.onrender.com')
+    'https://code-runner-5ov9.onrender.com')
     .trim()
     .replace(/\/+$/, '')
 const CODE_RUNNER_STREAM_API = CODE_RUNNER_API.endsWith('/run/stream')
