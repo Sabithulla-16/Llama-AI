@@ -1926,6 +1926,26 @@ textarea:focus {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.topbar-title {
+  display: block;
+}
+.title-loading-only {
+  display: inline-flex;
+  align-items: center;
+}
+.title-inline-loader {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.9s linear infinite;
+  flex: 0 0 auto;
+}
+.title-reveal {
+  display: inline-block;
+  animation: titleReveal 1.1s ease-out;
+}
 
 .topbar-actions {
   display: inline-flex;
@@ -4949,6 +4969,10 @@ textarea {
 .usage-value.usage-text {
   text-transform: capitalize;
 }
+.conversation-item-title.title-loading-only {
+  display: inline-flex;
+  align-items: center;
+}
 
 .personalize-panel {
   border: 1px solid color-mix(in srgb, var(--brand) 15%, var(--border));
@@ -6826,6 +6850,17 @@ textarea {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes titleReveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0.2;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
   }
 }
 

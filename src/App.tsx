@@ -195,6 +195,11 @@ const CODE_RUNNER_API =
     'https://code-runner-5ov9.onrender.com')
     .trim()
     .replace(/\/+$/, '')
+const TITLE_API_URL =
+  ((import.meta.env.VITE_TITLE_API_URL as string | undefined) ||
+    'https://valtry-llama-title.hf.space/generate-title')
+    .trim()
+    .replace(/\/+$/, '')
 const CODE_RUNNER_STREAM_API = CODE_RUNNER_API.endsWith('/run/stream')
   ? CODE_RUNNER_API
   : `${CODE_RUNNER_API}/run/stream`
@@ -2458,6 +2463,8 @@ type ChatWorkspaceProps = {
   conversations: Conversation[]
   activeConversationId: string | null
   isLoadingConversation: boolean
+  titleLoadingByConversationId: Record<string, boolean>
+  titleRevealByConversationId: Record<string, boolean>
   activeConversationModel: AIModel
   activeMessages: ChatMessage[]
   scrollAnchorMessageId: string | null
@@ -2510,6 +2517,8 @@ function ChatWorkspace({
   conversations,
   activeConversationId,
   isLoadingConversation,
+  titleLoadingByConversationId,
+  titleRevealByConversationId,
   activeConversationModel,
   activeMessages,
   scrollAnchorMessageId,
@@ -4532,6 +4541,8 @@ function ChatWorkspace({
                 {!collapsedGroups[group.key] && group.items.map((conv) => {
                   const isGeneratingConversation =
                     isGenerating && generatingConversationId === conv.id
+                  const isTitleLoading = Boolean(titleLoadingByConversationId[conv.id])
+                  const isTitleRevealing = Boolean(titleRevealByConversationId[conv.id])
                   return (
                     <div
                       key={conv.id}
@@ -4547,7 +4558,23 @@ function ChatWorkspace({
                           <span className="conversation-item-icon" aria-hidden="true">
                             <img src="/llama_logo_transparent.png" alt="" />
                           </span>
-                          <span className="conversation-item-title">{conv.title}</span>
+                          {isTitleLoading ? (
+                            <span
+                              className="conversation-item-title title-loading-only"
+                              role="status"
+                              aria-label="Generating title"
+                            >
+                              <span className="title-inline-loader" aria-hidden="true" />
+                            </span>
+                          ) : (
+                            <span
+                              className={`conversation-item-title ${
+                                isTitleRevealing ? 'title-reveal' : ''
+                              }`}
+                            >
+                              {conv.title}
+                            </span>
+                          )}
                         </span>
                         {isGeneratingConversation && (
                           <span
@@ -4597,7 +4624,29 @@ function ChatWorkspace({
           <button className="icon-button mobile-only" onClick={() => setSidebarOpen(true)}>
             <Menu size={18} />
           </button>
-          <h2>{conversations.find((item) => item.id === activeConversationId)?.title || 'Llama AI'}</h2>
+          {(() => {
+            const activeTitle =
+              conversations.find((item) => item.id === activeConversationId)?.title ||
+              'Llama AI'
+            const isTitleLoading =
+              Boolean(activeConversationId) &&
+              Boolean(titleLoadingByConversationId[activeConversationId])
+            const isTitleRevealing =
+              Boolean(activeConversationId) &&
+              Boolean(titleRevealByConversationId[activeConversationId])
+
+            return (
+              <h2 className="topbar-title">
+                {isTitleLoading ? (
+                  <span className="title-loading-only" role="status" aria-label="Generating title">
+                    <span className="title-inline-loader" aria-hidden="true" />
+                  </span>
+                ) : (
+                  <span className={isTitleRevealing ? 'title-reveal' : ''}>{activeTitle}</span>
+                )}
+              </h2>
+            )
+          })()}
           <div className="topbar-actions">
             <button
               className="icon-button"
@@ -7960,6 +8009,12 @@ function App() {
     null,
   )
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null)
+  const [titleLoadingByConversationId, setTitleLoadingByConversationId] = useState<
+    Record<string, boolean>
+  >({})
+  const [titleRevealByConversationId, setTitleRevealByConversationId] = useState<
+    Record<string, boolean>
+  >({})
   const [messagesMap, setMessagesMap] = useState<Record<string, ChatMessage[]>>({})
   const [promptPurpose, setPromptPurpose] = useState<PromptPurpose>('general')
   const [promptCards, setPromptCards] = useState<string[]>(() =>
@@ -7989,6 +8044,7 @@ function App() {
   const [confirmClearChats, setConfirmClearChats] = useState(true)
   const [chatExportEnabled, setChatExportEnabled] = useState(false)
   const [dataAnalyticsEnabled, setDataAnalyticsEnabled] = useState(false)
+  const [settingsHydrated, setSettingsHydrated] = useState(false)
   const [imageDataMap, setImageDataMap] = useState<Record<string, string>>({})
   const [imageTagDataMap, setImageTagDataMap] = useState<Record<string, string>>({})
   const [imagePromptDataMap, setImagePromptDataMap] = useState<Record<string, string[]>>({})
@@ -8015,6 +8071,10 @@ function App() {
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const noticeTimerRef = useRef<number | null>(null)
+  const pendingGenerationKey = session?.user?.id
+    ? `pending-generation:${session.user.id}`
+    : null
+  const settingsLoadInFlightRef = useRef(false)
 
   const showNotice = (message: string) => {
     setNotice(message)
@@ -8025,6 +8085,117 @@ function App() {
     noticeTimerRef.current = window.setTimeout(() => {
       setNotice('')
     }, 2000)
+  }
+
+  const applySettingsFromRow = useCallback((
+    dbSettings: Omit<UserSettingsRow, 'user_id'>,
+    keyPrefix: string,
+  ) => {
+    if (dbSettings.display_name) {
+      setDisplayName(dbSettings.display_name)
+      localStorage.setItem(`display-name:${keyPrefix}`, dbSettings.display_name)
+    }
+
+    if (
+      dbSettings.response_style === 'balanced' ||
+      dbSettings.response_style === 'concise' ||
+      dbSettings.response_style === 'detailed'
+    ) {
+      setResponseStyle(dbSettings.response_style)
+      localStorage.setItem(`response-style:${keyPrefix}`, dbSettings.response_style)
+    }
+
+    if (
+      dbSettings.prompt_purpose === 'general' ||
+      dbSettings.prompt_purpose === 'coding' ||
+      dbSettings.prompt_purpose === 'business' ||
+      dbSettings.prompt_purpose === 'study' ||
+      dbSettings.prompt_purpose === 'writing'
+    ) {
+      setPromptPurpose(dbSettings.prompt_purpose)
+      localStorage.setItem(`prompt-purpose:${keyPrefix}`, dbSettings.prompt_purpose)
+    }
+
+    if (dbSettings.theme === 'light' || dbSettings.theme === 'dark') {
+      setTheme(dbSettings.theme)
+      localStorage.setItem(`theme-mode:${keyPrefix}`, dbSettings.theme)
+    }
+
+    if (typeof dbSettings.enter_to_send === 'boolean') {
+      setEnterToSend(dbSettings.enter_to_send)
+      localStorage.setItem(`enter-to-send:${keyPrefix}`, String(dbSettings.enter_to_send))
+    }
+
+    if (typeof dbSettings.read_after_send === 'boolean') {
+      setReadAfterSend(dbSettings.read_after_send)
+      localStorage.setItem(`read-after-send:${keyPrefix}`, String(dbSettings.read_after_send))
+    }
+
+    if (dbSettings.suggestion_count === 4 || dbSettings.suggestion_count === 6) {
+      setSuggestionCount(dbSettings.suggestion_count)
+      localStorage.setItem(`suggestion-count:${keyPrefix}`, String(dbSettings.suggestion_count))
+    }
+
+    if (dbSettings.voice_language === 'en-US' || dbSettings.voice_language === 'en-GB') {
+      setVoiceLanguage(dbSettings.voice_language)
+      localStorage.setItem(`voice-language:${keyPrefix}`, dbSettings.voice_language)
+    }
+
+    if (dbSettings.read_voice_uri) {
+      setReadVoiceUri(dbSettings.read_voice_uri)
+      localStorage.setItem(`read-voice-uri:${keyPrefix}`, dbSettings.read_voice_uri)
+    }
+
+    if (typeof dbSettings.confirm_clear_chats === 'boolean') {
+      setConfirmClearChats(dbSettings.confirm_clear_chats)
+      localStorage.setItem(
+        `confirm-clear-chats:${keyPrefix}`,
+        String(dbSettings.confirm_clear_chats),
+      )
+    }
+
+    if (typeof dbSettings.chat_export_enabled === 'boolean') {
+      setChatExportEnabled(dbSettings.chat_export_enabled)
+      localStorage.setItem(
+        `chat-export-enabled:${keyPrefix}`,
+        String(dbSettings.chat_export_enabled),
+      )
+    }
+
+    if (typeof dbSettings.data_analytics_enabled === 'boolean') {
+      setDataAnalyticsEnabled(dbSettings.data_analytics_enabled)
+      localStorage.setItem(
+        `data-analytics-enabled:${keyPrefix}`,
+        String(dbSettings.data_analytics_enabled),
+      )
+    }
+  }, [])
+
+  const markPendingGeneration = (conversationId: string) => {
+    if (!pendingGenerationKey) return
+    localStorage.setItem(
+      pendingGenerationKey,
+      JSON.stringify({ conversationId, startedAt: new Date().toISOString() }),
+    )
+  }
+
+  const clearPendingGeneration = (conversationId?: string) => {
+    if (!pendingGenerationKey) return
+    if (!conversationId) {
+      localStorage.removeItem(pendingGenerationKey)
+      return
+    }
+
+    const raw = localStorage.getItem(pendingGenerationKey)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as { conversationId?: string }
+      if (parsed?.conversationId === conversationId) {
+        localStorage.removeItem(pendingGenerationKey)
+      }
+    } catch {
+      localStorage.removeItem(pendingGenerationKey)
+    }
   }
 
   const copyText = async (text: string) => {
@@ -8243,6 +8414,58 @@ function App() {
     [buildUserSettingsPayload],
   )
 
+  const loadUserSettingsFromDb = useCallback(
+    async (userId: string) => {
+      if (!supabase || settingsLoadInFlightRef.current) return
+      settingsLoadInFlightRef.current = true
+
+      try {
+        let { data, error: settingsError } = await supabase
+          .from('user_settings')
+          .select(
+            'display_name, theme, response_style, prompt_purpose, enter_to_send, read_after_send, suggestion_count, voice_language, read_voice_uri, confirm_clear_chats, chat_export_enabled, data_analytics_enabled',
+          )
+          .eq('user_id', userId)
+          .maybeSingle()
+
+        if (settingsError) {
+          setError(settingsError.message)
+          showNotice('Could not load settings from Supabase.')
+          return
+        }
+
+        if (!data) {
+          const { error: insertError } = await supabase
+            .from('user_settings')
+            .upsert({ user_id: userId }, { onConflict: 'user_id' })
+
+          if (insertError) {
+            setError(insertError.message)
+            showNotice('Could not initialize settings in Supabase.')
+            return
+          }
+
+          const reload = await supabase
+            .from('user_settings')
+            .select(
+              'display_name, theme, response_style, prompt_purpose, enter_to_send, read_after_send, suggestion_count, voice_language, read_voice_uri, confirm_clear_chats, chat_export_enabled, data_analytics_enabled',
+            )
+            .eq('user_id', userId)
+            .maybeSingle()
+
+          if (reload.error || !reload.data) return
+          data = reload.data
+        }
+
+        applySettingsFromRow(data as Omit<UserSettingsRow, 'user_id'>, userId)
+        setSettingsHydrated(true)
+      } finally {
+        settingsLoadInFlightRef.current = false
+      }
+    },
+    [applySettingsFromRow, supabase],
+  )
+
   const onSavePersonalization = (
     name: string,
     style: ResponseStyle,
@@ -8369,9 +8592,11 @@ function App() {
     localStorage.setItem('theme-mode', theme)
     if (session?.user?.id) {
       localStorage.setItem(`theme-mode:${session.user.id}`, theme)
-      void persistUserSettings(session.user.id, { theme })
+      if (settingsHydrated) {
+        void persistUserSettings(session.user.id, { theme })
+      }
     }
-  }, [theme, session?.user?.id, persistUserSettings])
+  }, [theme, session?.user?.id, persistUserSettings, settingsHydrated])
 
   const refreshPromptCards = (purpose = promptPurpose, count = suggestionCount) => {
     setPromptCards(pickRandomPrompts(purpose, count))
@@ -8382,6 +8607,7 @@ function App() {
 
     let active = true
     const keyPrefix = session.user.id
+    setSettingsHydrated(false)
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
     const storedStyle = localStorage.getItem(`response-style:${keyPrefix}`)
     const storedPurpose = localStorage.getItem(`prompt-purpose:${keyPrefix}`)
@@ -8432,118 +8658,18 @@ function App() {
     setDataAnalyticsEnabled(storedDataAnalytics === 'true')
     setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
 
-    const loadSettingsFromDb = async () => {
-      if (!supabase) return
-
-      const { data, error: settingsError } = await supabase
-        .from('user_settings')
-        .select(
-          'display_name, theme, response_style, prompt_purpose, enter_to_send, read_after_send, suggestion_count, voice_language, read_voice_uri, confirm_clear_chats, chat_export_enabled, data_analytics_enabled',
-        )
-        .eq('user_id', keyPrefix)
-        .maybeSingle()
-
-      if (!active) return
-      if (settingsError) {
-        setError(settingsError.message)
-        return
-      }
-      if (!data) return
-
-      const dbSettings = data as Omit<UserSettingsRow, 'user_id'>
-
-      if (dbSettings.display_name) {
-        setDisplayName(dbSettings.display_name)
-        localStorage.setItem(`display-name:${keyPrefix}`, dbSettings.display_name)
-      }
-
-      if (
-        dbSettings.response_style === 'balanced' ||
-        dbSettings.response_style === 'concise' ||
-        dbSettings.response_style === 'detailed'
-      ) {
-        setResponseStyle(dbSettings.response_style)
-        localStorage.setItem(`response-style:${keyPrefix}`, dbSettings.response_style)
-      }
-
-      if (
-        dbSettings.prompt_purpose === 'general' ||
-        dbSettings.prompt_purpose === 'coding' ||
-        dbSettings.prompt_purpose === 'business' ||
-        dbSettings.prompt_purpose === 'study' ||
-        dbSettings.prompt_purpose === 'writing'
-      ) {
-        setPromptPurpose(dbSettings.prompt_purpose)
-        localStorage.setItem(`prompt-purpose:${keyPrefix}`, dbSettings.prompt_purpose)
-      }
-
-      if (dbSettings.theme === 'light' || dbSettings.theme === 'dark') {
-        setTheme(dbSettings.theme)
-        localStorage.setItem(`theme-mode:${keyPrefix}`, dbSettings.theme)
-      }
-
-      if (typeof dbSettings.enter_to_send === 'boolean') {
-        setEnterToSend(dbSettings.enter_to_send)
-        localStorage.setItem(`enter-to-send:${keyPrefix}`, String(dbSettings.enter_to_send))
-      }
-
-      if (typeof dbSettings.read_after_send === 'boolean') {
-        setReadAfterSend(dbSettings.read_after_send)
-        localStorage.setItem(
-          `read-after-send:${keyPrefix}`,
-          String(dbSettings.read_after_send),
-        )
-      }
-
-      if (dbSettings.suggestion_count === 4 || dbSettings.suggestion_count === 6) {
-        setSuggestionCount(dbSettings.suggestion_count)
-        localStorage.setItem(
-          `suggestion-count:${keyPrefix}`,
-          String(dbSettings.suggestion_count),
-        )
-      }
-
-      if (dbSettings.voice_language === 'en-US' || dbSettings.voice_language === 'en-GB') {
-        setVoiceLanguage(dbSettings.voice_language)
-        localStorage.setItem(`voice-language:${keyPrefix}`, dbSettings.voice_language)
-      }
-
-      if (dbSettings.read_voice_uri) {
-        setReadVoiceUri(dbSettings.read_voice_uri)
-        localStorage.setItem(`read-voice-uri:${keyPrefix}`, dbSettings.read_voice_uri)
-      }
-
-      if (typeof dbSettings.confirm_clear_chats === 'boolean') {
-        setConfirmClearChats(dbSettings.confirm_clear_chats)
-        localStorage.setItem(
-          `confirm-clear-chats:${keyPrefix}`,
-          String(dbSettings.confirm_clear_chats),
-        )
-      }
-
-      if (typeof dbSettings.chat_export_enabled === 'boolean') {
-        setChatExportEnabled(dbSettings.chat_export_enabled)
-        localStorage.setItem(
-          `chat-export-enabled:${keyPrefix}`,
-          String(dbSettings.chat_export_enabled),
-        )
-      }
-
-      if (typeof dbSettings.data_analytics_enabled === 'boolean') {
-        setDataAnalyticsEnabled(dbSettings.data_analytics_enabled)
-        localStorage.setItem(
-          `data-analytics-enabled:${keyPrefix}`,
-          String(dbSettings.data_analytics_enabled),
-        )
-      }
-    }
-
-    void loadSettingsFromDb()
+    void loadUserSettingsFromDb(keyPrefix)
 
     return () => {
       active = false
     }
-  }, [session?.user?.id])
+  }, [session?.user?.id, supabase, loadUserSettingsFromDb])
+
+  useEffect(() => {
+    if (!session?.user?.id) return
+    if (location.pathname !== '/dashboard') return
+    void loadUserSettingsFromDb(session.user.id)
+  }, [location.pathname, session?.user?.id, loadUserSettingsFromDb])
 
   useEffect(() => {
     return () => {
@@ -8552,6 +8678,64 @@ function App() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!session?.user?.id || !supabase || !pendingGenerationKey) return
+
+    const raw = localStorage.getItem(pendingGenerationKey)
+    if (!raw) return
+
+    let parsed: { conversationId?: string } | null = null
+    try {
+      parsed = JSON.parse(raw) as { conversationId?: string }
+    } catch {
+      localStorage.removeItem(pendingGenerationKey)
+      return
+    }
+
+    const conversationId = parsed?.conversationId
+    if (!conversationId) {
+      localStorage.removeItem(pendingGenerationKey)
+      return
+    }
+
+    let active = true
+    let attempts = 0
+    const maxAttempts = 20
+
+    const hasCompletedAssistant = (messages: ChatMessage[]) => {
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((message) => message.role === 'assistant')
+      if (!lastAssistant) return false
+      const parsedContent = parseMessageContent(lastAssistant.content)
+      if (parsedContent.imageDataUrl) return true
+      return parsedContent.text.trim().length > 0
+    }
+
+    const poll = async () => {
+      if (!active) return
+      attempts += 1
+
+      const refreshed = await refreshMessages(conversationId, true)
+      if (refreshed && hasCompletedAssistant(refreshed)) {
+        clearPendingGeneration(conversationId)
+        return
+      }
+
+      if (attempts >= maxAttempts) {
+        clearPendingGeneration(conversationId)
+      }
+    }
+
+    void poll()
+    const interval = window.setInterval(poll, 3000)
+
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [session?.user?.id, supabase, pendingGenerationKey])
 
   useEffect(() => {
     if (!supabase) {
@@ -8606,6 +8790,18 @@ function App() {
   }, [session, booting, location.pathname, navigate])
 
   useEffect(() => {
+    if (booting || !session) return
+    if (!location.pathname.startsWith('/chat')) return
+
+    const hasStarted = sessionStorage.getItem('chat-started') === '1'
+    if (hasStarted) return
+
+    sessionStorage.setItem('chat-started', '1')
+    setActiveConversationId(null)
+    navigate('/chat/new-chat', { replace: true })
+  }, [booting, session, location.pathname, navigate])
+
+  useEffect(() => {
     if (!session?.user || !supabase) {
       setConversations([])
       setActiveConversationId(null)
@@ -8634,8 +8830,11 @@ function App() {
       setConversations(chats)
 
       const isNewChatRoute = location.pathname === '/chat/new-chat'
+      const shouldForceNewChat = sessionStorage.getItem('chat-started') !== '1'
       const fromQuery = new URLSearchParams(window.location.search).get('c')
-      if (fromQuery && chats.some((conv) => conv.id === fromQuery)) {
+      if (shouldForceNewChat && location.pathname.startsWith('/chat')) {
+        setActiveConversationId(null)
+      } else if (fromQuery && chats.some((conv) => conv.id === fromQuery)) {
         setActiveConversationId(fromQuery)
       } else if (isNewChatRoute) {
         // Keep current selection untouched on the explicit new-chat route.
@@ -9049,6 +9248,61 @@ function App() {
     )
   }
 
+  const generateConversationTitle = async (
+    conversationId: string,
+    prompt: string,
+  ) => {
+    const trimmedPrompt = prompt.trim()
+    if (!trimmedPrompt) return
+
+    setTitleLoadingByConversationId((prev) => ({
+      ...prev,
+      [conversationId]: true,
+    }))
+
+    try {
+      const response = await fetch(TITLE_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          prompt: trimmedPrompt,
+        }),
+      })
+
+      if (response.ok) {
+        const data = (await response.json()) as { title?: unknown }
+        const title = typeof data.title === 'string' ? data.title.trim() : ''
+        if (title) {
+          await updateConversationTitle(conversationId, title)
+        } else {
+          await updateConversationTitle(conversationId, deriveTitle(trimmedPrompt))
+        }
+      } else {
+        await updateConversationTitle(conversationId, deriveTitle(trimmedPrompt))
+      }
+    } catch {
+      await updateConversationTitle(conversationId, deriveTitle(trimmedPrompt))
+    } finally {
+      setTitleLoadingByConversationId((prev) => ({
+        ...prev,
+        [conversationId]: false,
+      }))
+      setTitleRevealByConversationId((prev) => ({
+        ...prev,
+        [conversationId]: true,
+      }))
+      window.setTimeout(() => {
+        setTitleRevealByConversationId((prev) => ({
+          ...prev,
+          [conversationId]: false,
+        }))
+      }, 1200)
+    }
+  }
+
   const moveConversationToTop = (conversationId: string) => {
     setConversations((prev) => {
       const index = prev.findIndex((item) => item.id === conversationId)
@@ -9177,7 +9431,9 @@ function App() {
     const originalPromptMessageId = options?.originalPromptMessageId
     const regeneratePromptContent = options?.regeneratePromptContent
 
-    const initialConversationTitle = deriveTitle(promptForRequest)
+    const initialConversationTitle = activeConversationId
+      ? deriveTitle(promptForRequest)
+      : 'New Chat'
 
     let conversationId = await ensureConversation(initialConversationTitle)
     if (!conversationId) return
@@ -9193,6 +9449,7 @@ function App() {
     moveConversationToTop(conversationId)
     markConversationUsed(conversationId)
     setActiveConversationId(conversationId)
+    markPendingGeneration(conversationId)
 
     navigate(`/chat/${slugify(promptForRequest)}?c=${conversationId}`)
 
@@ -9289,7 +9546,7 @@ function App() {
 
     const isFirstMessage = (messagesMap[conversationId] || []).length === 0
     if (isFirstMessage && !isRegenerate) {
-      void updateConversationTitle(conversationId, deriveTitle(promptForRequest))
+      void generateConversationTitle(conversationId, promptForRequest)
     }
 
     if (!isRegenerate) {
@@ -9490,6 +9747,7 @@ function App() {
       setImageCreateStatus(null)
       setIsThinking(false)
       abortRef.current = null
+      clearPendingGeneration(conversationId)
       if (isRegenerate && regeneratePromptContent) {
         await deleteDuplicateRegeneratePrompt(
           conversationId,
@@ -9538,6 +9796,7 @@ function App() {
       } catch {
         // Stop endpoint failure should not block local cancellation.
       }
+      clearPendingGeneration(conversationId || undefined)
       return
     }
 
@@ -9851,6 +10110,8 @@ function App() {
                   loadingConversationId === activeConversationId &&
                   (activeConversationId ? !messagesMap[activeConversationId] : false)
                 }
+                titleLoadingByConversationId={titleLoadingByConversationId}
+                titleRevealByConversationId={titleRevealByConversationId}
                 activeConversationModel={activeConversationModel}
                 activeMessages={activeMessages}
                 scrollAnchorMessageId={scrollAnchorMessageId}
