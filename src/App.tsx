@@ -4628,12 +4628,12 @@ function ChatWorkspace({
             const activeTitle =
               conversations.find((item) => item.id === activeConversationId)?.title ||
               'Llama AI'
-            const isTitleLoading =
-              Boolean(activeConversationId) &&
-              Boolean(titleLoadingByConversationId[activeConversationId])
-            const isTitleRevealing =
-              Boolean(activeConversationId) &&
-              Boolean(titleRevealByConversationId[activeConversationId])
+            const isTitleLoading = activeConversationId
+              ? Boolean(titleLoadingByConversationId[activeConversationId])
+              : false
+            const isTitleRevealing = activeConversationId
+              ? Boolean(titleRevealByConversationId[activeConversationId])
+              : false
 
             return (
               <h2 className="topbar-title">
@@ -8605,7 +8605,6 @@ function App() {
   useEffect(() => {
     if (!session?.user?.id) return
 
-    let active = true
     const keyPrefix = session.user.id
     setSettingsHydrated(false)
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
@@ -8659,10 +8658,6 @@ function App() {
     setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
 
     void loadUserSettingsFromDb(keyPrefix)
-
-    return () => {
-      active = false
-    }
   }, [session?.user?.id, supabase, loadUserSettingsFromDb])
 
   useEffect(() => {
