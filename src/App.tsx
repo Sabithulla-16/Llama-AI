@@ -2518,12 +2518,6 @@ type ChatWorkspaceProps = {
     imageDataUrl?: string | null,
     options?: GenerationOptions,
   ) => Promise<void>
-  sendMessage: (
-    input: string,
-    imageFile?: File | null,
-    imageDataUrl?: string | null,
-    options?: GenerationOptions,
-  ) => Promise<void>
   onNewChat: () => Promise<void>
   onShareMessage: (content: string, imageSrc?: string) => Promise<void>
   onShareConversation: (conversationId: string) => Promise<void>
@@ -2567,7 +2561,6 @@ function ChatWorkspace({
   setDraft,
   setSelectedModel,
   onSendOrStop,
-  sendMessage,
   onNewChat,
   onShareMessage,
   onShareConversation,
@@ -4892,12 +4885,12 @@ function ChatWorkspace({
             const activeTitle =
               conversations.find((item) => item.id === activeConversationId)?.title ||
               'Llama AI'
-            const isTitleLoading =
-              Boolean(activeConversationId) &&
-              Boolean(titleLoadingByConversationId[activeConversationId])
-            const isTitleRevealing =
-              Boolean(activeConversationId) &&
-              Boolean(titleRevealByConversationId[activeConversationId])
+            const isTitleLoading = activeConversationId
+              ? Boolean(titleLoadingByConversationId[activeConversationId])
+              : false
+            const isTitleRevealing = activeConversationId
+              ? Boolean(titleRevealByConversationId[activeConversationId])
+              : false
 
             return (
               <h2 className="topbar-title">
@@ -8928,7 +8921,6 @@ function App() {
   useEffect(() => {
     if (!session?.user?.id) return
 
-    let active = true
     const keyPrefix = session.user.id
     setSettingsHydrated(false)
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
@@ -8982,10 +8974,6 @@ function App() {
     setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
 
     void loadUserSettingsFromDb(keyPrefix)
-
-    return () => {
-      active = false
-    }
   }, [session?.user?.id, supabase, loadUserSettingsFromDb])
 
   useEffect(() => {
@@ -10457,7 +10445,6 @@ function App() {
                 setDraft={setDraft}
                 setSelectedModel={setSelectedModel}
                 onSendOrStop={onSendOrStop}
-                sendMessage={sendMessage}
                 onNewChat={onNewChat}
                 onShareMessage={onShareMessage}
                 onShareConversation={onShareConversation}
