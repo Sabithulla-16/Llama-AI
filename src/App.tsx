@@ -238,6 +238,10 @@ const COMPOSER_MODEL_LABELS: Record<ComposerModel, string> = {
 }
 
 const COMPOSER_MODEL_OPTIONS: ComposerModel[] = ['llama', 'coder', 'image']
+const MOBILE_SIDEBAR_BREAKPOINT = 960
+const SIDEBAR_SWIPE_MIN_DISTANCE_PX = 40
+const SIDEBAR_SWIPE_MAX_VERTICAL_DRIFT_PX = 140
+const SIDEBAR_HORIZONTAL_BIAS = 1
 
 const isAIModel = (value: unknown): value is AIModel =>
   typeof value === 'string' && value in MODEL_ENGINE_LABELS
@@ -749,6 +753,28 @@ function getConversationGroupKey(timestamp: string, now = new Date()): Conversat
   if (diffDays === 1) return 'yesterday'
   if (diffDays <= 7) return 'previous7'
   return 'older'
+}
+
+const getMessageDateKey = (date: Date) =>
+  `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+
+const formatMessageDateLabel = (date: Date, now = new Date()) => {
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  const dateLabel = isToday
+    ? 'Today'
+    : new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(date)
+  const timeLabel = new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+  return `${dateLabel} • ${timeLabel}`
 }
 
 
@@ -2766,6 +2792,7 @@ function ChatWorkspace({
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const messageScrollRef = useRef<HTMLElement | null>(null)
   const scrollAnimationFrameRef = useRef<number | null>(null)
+  const scrollToLatestTimerRef = useRef<number | null>(null)
   const anchorAppliedRef = useRef(false)
   const lastAnchoredMessageIdRef = useRef<string | null>(null)
   const recognitionRef = useRef<any>(null)
@@ -2807,6 +2834,19 @@ function ChatWorkspace({
   >({})
   const [feedbackSavingMessageId, setFeedbackSavingMessageId] = useState<string | null>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
+  const [isDragActive, setIsDragActive] = useState(false)
+  const dragCounterRef = useRef(0)
+  const sidebarSwipeRef = useRef<{
+    startX: number
+    startY: number
+    mode: 'open' | 'close' | null
+    triggered: boolean
+  }>({
+    startX: 0,
+    startY: 0,
+    mode: null,
+    triggered: false,
+  })
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [showImageModal, setShowImageModal] = useState(false)
@@ -2986,6 +3026,96 @@ function ChatWorkspace({
     }
   }, [imageVariantRecords, imageVariantStorageKey])
 
+  const isMobileSidebarSwipeEnabled = () => window.innerWidth <= MOBILE_SIDEBAR_BREAKPOINT
+
+  const isHorizontalSidebarSwipe = (deltaX: number, deltaY: number) => {
+    const absDeltaX = Math.abs(deltaX)
+    const absDeltaY = Math.abs(deltaY)
+    return (
+      absDeltaX >= SIDEBAR_SWIPE_MIN_DISTANCE_PX &&
+      absDeltaY <= SIDEBAR_SWIPE_MAX_VERTICAL_DRIFT_PX &&
+      absDeltaX >= absDeltaY * SIDEBAR_HORIZONTAL_BIAS
+    )
+  }
+
+  const handleWorkspaceTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1 || !isMobileSidebarSwipeEnabled()) {
+      sidebarSwipeRef.current = {
+        startX: 0,
+        startY: 0,
+        mode: null,
+        triggered: false,
+      }
+      return
+    }
+
+    const touch = event.touches[0]
+    sidebarSwipeRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      mode: sidebarOpen ? 'close' : 'open',
+      triggered: false,
+    }
+  }
+
+  const handleWorkspaceTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!isMobileSidebarSwipeEnabled() || event.touches.length === 0) {
+      return
+    }
+
+    const swipeState = sidebarSwipeRef.current
+    const { startX, startY, mode, triggered } = swipeState
+    if (!mode || triggered) return
+
+    const touch = event.touches[0]
+    const deltaX = touch.clientX - startX
+    const deltaY = Math.abs(touch.clientY - startY)
+
+    if (!isHorizontalSidebarSwipe(deltaX, deltaY)) return
+
+    if (mode === 'open' && deltaX > 0) {
+      setSidebarOpen(true)
+      swipeState.triggered = true
+    } else if (mode === 'close' && deltaX < 0) {
+      setSidebarOpen(false)
+      swipeState.triggered = true
+    }
+  }
+
+  const handleWorkspaceTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!isMobileSidebarSwipeEnabled() || event.changedTouches.length === 0) {
+      sidebarSwipeRef.current.mode = null
+      sidebarSwipeRef.current.triggered = false
+      return
+    }
+
+    const { startX, startY, mode, triggered } = sidebarSwipeRef.current
+    if (!mode || triggered) {
+      sidebarSwipeRef.current.mode = null
+      sidebarSwipeRef.current.triggered = false
+      return
+    }
+
+    const touch = event.changedTouches[0]
+    const deltaX = touch.clientX - startX
+    const deltaY = Math.abs(touch.clientY - startY)
+    if (isHorizontalSidebarSwipe(deltaX, deltaY)) {
+      if (mode === 'open' && deltaX > 0) {
+        setSidebarOpen(true)
+      } else if (mode === 'close' && deltaX < 0) {
+        setSidebarOpen(false)
+      }
+    }
+
+    sidebarSwipeRef.current.mode = null
+    sidebarSwipeRef.current.triggered = false
+  }
+
+  const handleWorkspaceTouchCancel = () => {
+    sidebarSwipeRef.current.mode = null
+    sidebarSwipeRef.current.triggered = false
+  }
+
   const clearSelectedImage = () => {
     setSelectedImageFile(null)
     setPreviewImageUrl(null)
@@ -3007,6 +3137,96 @@ function ChatWorkspace({
     }
     reader.readAsDataURL(file)
   }
+
+  const getFirstImageFile = (items?: FileList | File[] | null) => {
+    if (!items) return null
+    const list = Array.from(items)
+    return list.find((item) => item.type.startsWith('image/')) || null
+  }
+
+  const handleComposerDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (event.dataTransfer?.types?.includes('Files')) {
+      event.preventDefault()
+      setIsDragActive(true)
+    }
+  }
+
+  const handleComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (event.dataTransfer?.types?.includes('Files')) {
+      event.preventDefault()
+      setIsDragActive(true)
+    }
+  }
+
+  const handleComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as Node | null
+    if (nextTarget && event.currentTarget.contains(nextTarget)) return
+    setIsDragActive(false)
+  }
+
+  const handleComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const file = getFirstImageFile(event.dataTransfer?.files)
+    if (!file) return
+    event.preventDefault()
+    setIsDragActive(false)
+    handleImageSelect(file)
+  }
+
+  const handleComposerPaste = (
+    event: React.ClipboardEvent<HTMLTextAreaElement>,
+  ) => {
+    const file = getFirstImageFile(event.clipboardData?.files)
+    if (!file) return
+    event.preventDefault()
+    handleImageSelect(file)
+  }
+
+  useEffect(() => {
+    const hasFiles = (event: DragEvent) =>
+      Array.from(event.dataTransfer?.types || []).includes('Files')
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+      dragCounterRef.current += 1
+      setIsDragActive(true)
+    }
+
+    const handleDragOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+    }
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      dragCounterRef.current = Math.max(0, dragCounterRef.current - 1)
+      if (dragCounterRef.current === 0) {
+        setIsDragActive(false)
+      }
+    }
+
+    const handleDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+      dragCounterRef.current = 0
+      setIsDragActive(false)
+      const file = getFirstImageFile(event.dataTransfer?.files)
+      if (file) {
+        handleImageSelect(file)
+      }
+    }
+
+    window.addEventListener('dragenter', handleDragEnter)
+    window.addEventListener('dragover', handleDragOver)
+    window.addEventListener('dragleave', handleDragLeave)
+    window.addEventListener('drop', handleDrop)
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter)
+      window.removeEventListener('dragover', handleDragOver)
+      window.removeEventListener('dragleave', handleDragLeave)
+      window.removeEventListener('drop', handleDrop)
+    }
+  }, [])
 
   const resizeComposerTextarea = (textarea: HTMLTextAreaElement) => {
     textarea.style.height = 'auto'
@@ -3370,6 +3590,32 @@ function ChatWorkspace({
       container.removeEventListener('scroll', onScroll)
     }
   }, [activeConversationId, isGenerating, visibleMessages.length])
+
+  useEffect(() => {
+    if (!showScrollToLatest) {
+      if (scrollToLatestTimerRef.current) {
+        window.clearTimeout(scrollToLatestTimerRef.current)
+        scrollToLatestTimerRef.current = null
+      }
+      return
+    }
+
+    if (scrollToLatestTimerRef.current) {
+      window.clearTimeout(scrollToLatestTimerRef.current)
+    }
+
+    scrollToLatestTimerRef.current = window.setTimeout(() => {
+      setShowScrollToLatest(false)
+      scrollToLatestTimerRef.current = null
+    }, 4500)
+
+    return () => {
+      if (scrollToLatestTimerRef.current) {
+        window.clearTimeout(scrollToLatestTimerRef.current)
+        scrollToLatestTimerRef.current = null
+      }
+    }
+  }, [showScrollToLatest])
 
   const getSpeechRecognitionCtor = useCallback(() => {
     const speechApi =
@@ -4503,7 +4749,13 @@ function ChatWorkspace({
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      onTouchStart={handleWorkspaceTouchStart}
+      onTouchMove={handleWorkspaceTouchMove}
+      onTouchEnd={handleWorkspaceTouchEnd}
+      onTouchCancel={handleWorkspaceTouchCancel}
+    >
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${isGenerating ? 'streaming' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-brand">
@@ -4620,6 +4872,18 @@ function ChatWorkspace({
       </aside>
 
       <div className="chat-pane">
+        <div className={`global-dropzone ${isDragActive ? 'active' : ''}`} aria-hidden="true">
+          <div className="global-dropzone-ring" />
+          <div className="global-dropzone-core">
+            <span className="global-dropzone-icon">
+              <ImagePlus size={22} />
+            </span>
+            <div className="global-dropzone-text">
+              <strong>Drop image to upload</strong>
+              <span>Drag anywhere or paste into the composer</span>
+            </div>
+          </div>
+        </div>
         <header className="topbar">
           <button className="icon-button mobile-only" onClick={() => setSidebarOpen(true)}>
             <Menu size={18} />
@@ -4628,12 +4892,12 @@ function ChatWorkspace({
             const activeTitle =
               conversations.find((item) => item.id === activeConversationId)?.title ||
               'Llama AI'
-            const isTitleLoading = activeConversationId
-              ? Boolean(titleLoadingByConversationId[activeConversationId])
-              : false
-            const isTitleRevealing = activeConversationId
-              ? Boolean(titleRevealByConversationId[activeConversationId])
-              : false
+            const isTitleLoading =
+              Boolean(activeConversationId) &&
+              Boolean(titleLoadingByConversationId[activeConversationId])
+            const isTitleRevealing =
+              Boolean(activeConversationId) &&
+              Boolean(titleRevealByConversationId[activeConversationId])
 
             return (
               <h2 className="topbar-title">
@@ -4759,8 +5023,14 @@ function ChatWorkspace({
                     key={prompt}
                     className="suggestion-card"
                     onClick={() => {
-                      void sendMessage(prompt, selectedImageFile)
-                      clearSelectedImage()
+                      setDraft(prompt)
+                      window.requestAnimationFrame(() => {
+                        const target = composerTextareaRef.current
+                        if (!target) return
+                        const length = prompt.length
+                        target.focus()
+                        target.setSelectionRange(length, length)
+                      })
                     }}
                   >
                     <strong>{prompt}</strong>
@@ -4781,6 +5051,7 @@ function ChatWorkspace({
                 let lastRenderedTurnPrompt = ''
                 let lastRenderedTurnAssistantBase = ''
                 let pendingDuplicateAssistantBase = ''
+                let lastRenderedDateKey = ''
 
                 const getAssistantSignature = (candidate: ChatMessage) => {
                   if (candidate.role !== 'assistant') return ''
@@ -4952,6 +5223,10 @@ function ChatWorkspace({
                   const userPromptText =
                     message.role === 'user'
                       ? parsedContent.imagePrompt
+                      : ''
+                  const userCopyText =
+                    message.role === 'user'
+                      ? parsedContent.imagePrompt || parsedContent.text
                       : ''
                   const assistantDisplayContent =
                     message.role === 'assistant' ? parsedContent.text : ''
@@ -5130,354 +5405,381 @@ function ChatWorkspace({
                     }
                   }
 
+                  const messageDate = new Date(message.created_at)
+                  const messageDateKey = getMessageDateKey(messageDate)
+                  const shouldShowDate = messageDateKey !== lastRenderedDateKey
+                  if (shouldShowDate) {
+                    lastRenderedDateKey = messageDateKey
+                  }
+
                   return (
-                    <article
-                      key={message.id}
-                      id={`message-${message.id}`}
-                      className={`message-row ${
-                        message.role === 'user' ? 'user-row' : 'assistant-row'
-                      }`}
-                    >
-                      {message.role === 'assistant' ? (
-                        <div className="assistant-bubble-wrap">
-                          <img
-                            className="assistant-message-logo"
-                            src="/llama_logo_transparent.png"
-                            alt="Llama AI"
-                          />
-                          <div className={`bubble assistant ${hasAssistantImage || isImageGenerationPending ? 'with-image' : ''}`}>
-                            {isPendingAssistant ? (
-                              isImageGenerationPending ? (
-                                <ImageGenerationPlaceholder
-                                  status={imageCreateStatus === 'created' ? 'created' : 'creating'}
-                                />
-                              ) : (
-                                <div className="thinking-inline">
-                                  <span className="thinking-dot"></span>
-                                  <span className="thinking-dot"></span>
-                                  <span className="thinking-dot"></span>
-                                  <p>{pendingStatusText}</p>
-                                </div>
-                              )
-                            ) : hasAssistantImage ? (
-                              <div className="message-image-card assistant-generated-image-card">
-                                <ProgressiveImage
-                                  src={effectiveAssistantImageSrc}
-                                  alt={parsedContent.imagePrompt || 'Generated image'}
-                                  className="message-image assistant-generated-image"
-                                  onClick={() => {
-                                    if (!effectiveAssistantImageSrc) return
-                                    setPreviewImageUrl(effectiveAssistantImageSrc)
-                                    setShowImageModal(true)
-                                  }}
-                                />
-                              </div>
-                            ) : isAssistantImageLoadingSlot ? (
-                              <ImageSlotLoader />
-                            ) : (
-                              <ReactMarkdown
-                                remarkPlugins={[remarkGfm]}
-                                components={{
-                                  code: ({ node, className, children, ...props }) => {
-                                    const code = String(children)
-                                    const language = className?.replace('language-', '')
-                                    const meta =
-                                      ((node as { data?: { meta?: string }; meta?: string } | undefined)
-                                        ?.data?.meta ||
-                                        (node as { meta?: string } | undefined)?.meta ||
-                                        '')
-                                    const isBlock = Boolean(language) || code.includes('\n')
-
-                                    if (isBlock) {
-                                      return (
-                                        <CopyableCodeBlock language={language} meta={meta}>
-                                          {code}
-                                        </CopyableCodeBlock>
-                                      )
-                                    }
-
-                                    return (
-                                      <code className={className} {...props}>
-                                        {children}
-                                      </code>
-                                    )
-                                  },
-                                }}
-                              >
-                                {cleanAssistantOutput(effectiveAssistantDisplayContent)}
-                              </ReactMarkdown>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className={`bubble ${message.role} ${
-                            message.role === 'user' && hasUserImage ? 'with-image' : ''
-                          }`}
-                        >
-                          {hasUserImage ? (
-                            <div className="message-image-card">
-                              <ProgressiveImage
-                                src={userImageSrc}
-                                alt="Uploaded image"
-                                className="message-image"
-                                onClick={() => {
-                                  if (!userImageSrc) return
-                                  setPreviewImageUrl(userImageSrc)
-                                  setShowImageModal(true)
-                                }}
-                              />
-                              {userPromptText && (
-                                <p className="message-image-caption">{userPromptText}</p>
-                              )}
-                            </div>
-                          ) : (
-                            <p>{parsedContent.text}</p>
-                          )}
+                    <div key={message.id}>
+                      {shouldShowDate && (
+                        <div className="message-date-separator" aria-hidden="true">
+                          <span>{formatMessageDateLabel(messageDate)}</span>
                         </div>
                       )}
-                    {!isAssistantResponseInProgress && message.role === 'assistant' && (
-                      <div className="message-actions message-actions-outside">
-                        {!((hasAssistantImage && hasImageVariant) || (!hasAssistantImage && hasBranchForMessage)) && (
-                          <button
-                            type="button"
-                            className="ghost-button action-btn message-action-icon"
-                            onClick={() =>
-                              void handleRegenerateMessage(
-                                message.id,
-                                getMessageModel(message),
-                                message.content,
-                                message.created_at,
-                              )
-                            }
-                            title="Regenerate"
-                            aria-label="Regenerate"
-                          >
-                            <RotateCcw size={16} />
-                          </button>
-                        )}
-                        {!hasAssistantImage && (
-                          <button
-                            type="button"
-                            className={`ghost-button action-btn message-action-icon ${copiedMessageId === message.id ? 'copied' : ''}`}
-                            onClick={() =>
-                              handleCopyMessage(
-                                message.id,
-                                message.role === 'assistant'
-                                  ? assistantDisplayContent
-                                  : parsedContent.text,
-                              )
-                            }
-                            title={copiedMessageId === message.id ? 'Copied' : 'Copy'}
-                            aria-label={copiedMessageId === message.id ? 'Copied' : 'Copy'}
-                          >
-                            {copiedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
-                          </button>
-                        )}
-                        {message.role === 'assistant' && (
-                          <>
-                            {(messageFeedback === null || messageFeedback === 'like') && (
-                              <button
-                                type="button"
-                                className={`ghost-button action-btn message-action-icon message-feedback-button ${
-                                  messageFeedback === 'like' ? 'active-like' : ''
-                                }`}
-                                onClick={() => void handleMessageFeedback(message, 'like')}
-                                title="Like"
-                                aria-label="Like"
-                                disabled={feedbackSavingMessageId === message.id}
-                              >
-                                <ThumbsUp
-                                  size={16}
-                                  fill={messageFeedback === 'like' ? 'currentColor' : 'none'}
-                                />
-                              </button>
-                            )}
-                            {(messageFeedback === null || messageFeedback === 'dislike') && (
-                              <button
-                                type="button"
-                                className={`ghost-button action-btn message-action-icon message-feedback-button ${
-                                  messageFeedback === 'dislike' ? 'active-dislike' : ''
-                                }`}
-                                onClick={() => void handleMessageFeedback(message, 'dislike')}
-                                title="Dislike"
-                                aria-label="Dislike"
-                                disabled={feedbackSavingMessageId === message.id}
-                              >
-                                <ThumbsDown
-                                  size={16}
-                                  fill={messageFeedback === 'dislike' ? 'currentColor' : 'none'}
-                                />
-                              </button>
-                            )}
-                          </>
-                        )}
-                        {hasAssistantImage ? (
-                          <button
-                            type="button"
-                            className="ghost-button action-btn message-action-icon"
-                            onClick={() =>
-                              handleDownloadAssistantImage(effectiveAssistantImageSrc)
-                            }
-                            title="Download image"
-                            aria-label="Download image"
-                          >
-                            <Download size={16} />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className={`ghost-button action-btn message-action-icon ${readingMessageId === message.id ? 'reading' : ''}`}
-                            onClick={() => handleReadAloud(message.id, effectiveAssistantDisplayContent)}
-                            title={readingMessageId === message.id ? 'Reading...' : 'Read aloud'}
-                            aria-label={readingMessageId === message.id ? 'Reading' : 'Read aloud'}
-                          >
-                            {readingMessageId === message.id ? (
-                              <Loader2 size={16} className="action-icon-spin" />
-                            ) : (
-                              <Volume2 size={16} />
-                            )}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="ghost-button action-btn message-action-icon"
-                          onClick={() =>
-                            void onShareMessage(
-                              message.role === 'assistant'
-                                ? assistantDisplayContent
-                                : parsedContent.text,
-                              hasAssistantImage ? effectiveAssistantImageSrc : undefined,
-                            )
-                          }
-                          title="Share"
-                          aria-label="Share"
-                        >
-                          <Share2 size={16} />
-                        </button>
-                        {hasAssistantImage &&
-                          (hasImageVariant ? (
-                            <>
-                              <button
-                                type="button"
-                                className={`ghost-button action-btn message-action-icon ${imagePreferred === 'original' ? 'branch-nav-active' : ''}`}
-                                onClick={() =>
-                                  handlePreferImageResponse(
-                                    message.id,
-                                    'original',
-                                    message.content,
-                                    imageOriginalSrc,
-                                    effectiveVariantSrc,
-                                    imagePrompt,
-                                    { closeOverlay: false },
-                                  )
-                                }
-                                title="Show Response 1"
-                                aria-label="Show Response 1"
-                              >
-                                <ChevronLeft size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className={`ghost-button action-btn message-action-icon ${imagePreferred === 'variant' ? 'branch-nav-active' : ''}`}
-                                onClick={() =>
-                                  handlePreferImageResponse(
-                                    message.id,
-                                    'variant',
-                                    message.content,
-                                    imageOriginalSrc,
-                                    effectiveVariantSrc,
-                                    imagePrompt,
-                                    { closeOverlay: false },
-                                  )
-                                }
-                                title="Show Response 2"
-                                aria-label="Show Response 2"
-                              >
-                                <ChevronRight size={16} />
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              className={`ghost-button action-btn message-action-icon ${imageComparisons[message.id]?.loading ? 'reading' : ''}`}
-                              onClick={() =>
-                                void handleGenerateImageVariant(message.id, message.content)
-                              }
-                              title="Generate Response 2"
-                              aria-label="Generate Response 2"
-                              disabled={imageComparisons[message.id]?.loading}
-                            >
-                              {imageComparisons[message.id]?.loading ? (
-                                <Loader2 size={16} className="action-icon-spin" />
+                      <article
+                        id={`message-${message.id}`}
+                        className={`message-row ${
+                          message.role === 'user' ? 'user-row' : 'assistant-row'
+                        }`}
+                      >
+                        {message.role === 'assistant' ? (
+                          <div className="assistant-bubble-wrap">
+                            <img
+                              className="assistant-message-logo"
+                              src="/llama_logo_transparent.png"
+                              alt="Llama AI"
+                            />
+                            <div className={`bubble assistant ${hasAssistantImage || isImageGenerationPending ? 'with-image' : ''}`}>
+                              {isPendingAssistant ? (
+                                isImageGenerationPending ? (
+                                  <ImageGenerationPlaceholder
+                                    status={imageCreateStatus === 'created' ? 'created' : 'creating'}
+                                  />
+                                ) : (
+                                  <div className="thinking-inline">
+                                    <span className="thinking-dot"></span>
+                                    <span className="thinking-dot"></span>
+                                    <span className="thinking-dot"></span>
+                                    <p>{pendingStatusText}</p>
+                                  </div>
+                                )
+                              ) : hasAssistantImage ? (
+                                <div className="message-image-card assistant-generated-image-card">
+                                  <ProgressiveImage
+                                    src={effectiveAssistantImageSrc}
+                                    alt={parsedContent.imagePrompt || 'Generated image'}
+                                    className="message-image assistant-generated-image"
+                                    onClick={() => {
+                                      if (!effectiveAssistantImageSrc) return
+                                      setPreviewImageUrl(effectiveAssistantImageSrc)
+                                      setShowImageModal(true)
+                                    }}
+                                  />
+                                </div>
+                              ) : isAssistantImageLoadingSlot ? (
+                                <ImageSlotLoader />
                               ) : (
-                                <GitBranch size={16} />
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    code: ({ node, className, children, ...props }) => {
+                                      const code = String(children)
+                                      const language = className?.replace('language-', '')
+                                      const meta =
+                                        ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                                          ?.data?.meta ||
+                                          (node as { meta?: string } | undefined)?.meta ||
+                                          '')
+                                      const isBlock = Boolean(language) || code.includes('\n')
+
+                                      if (isBlock) {
+                                        return (
+                                          <CopyableCodeBlock language={language} meta={meta}>
+                                            {code}
+                                          </CopyableCodeBlock>
+                                        )
+                                      }
+
+                                      return (
+                                        <code className={className} {...props}>
+                                          {children}
+                                        </code>
+                                      )
+                                    },
+                                  }}
+                                >
+                                  {cleanAssistantOutput(effectiveAssistantDisplayContent)}
+                                </ReactMarkdown>
                               )}
-                            </button>
-                          ))}
-                        {!hasAssistantImage &&
-                          (hasBranchForMessage ? (
-                            <>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="user-bubble-wrap">
+                            <div
+                              className={`bubble ${message.role} ${
+                                message.role === 'user' && hasUserImage ? 'with-image' : ''
+                              }`}
+                            >
+                              {hasUserImage ? (
+                                <div className="message-image-card">
+                                  <ProgressiveImage
+                                    src={userImageSrc}
+                                    alt="Uploaded image"
+                                    className="message-image"
+                                    onClick={() => {
+                                      if (!userImageSrc) return
+                                      setPreviewImageUrl(userImageSrc)
+                                      setShowImageModal(true)
+                                    }}
+                                  />
+                                  {userPromptText && (
+                                    <p className="message-image-caption">{userPromptText}</p>
+                                  )}
+                                </div>
+                              ) : (
+                                <p>{parsedContent.text}</p>
+                              )}
+                            </div>
+                            <div className="message-actions message-actions-outside user-message-actions">
                               <button
                                 type="button"
-                                className={`ghost-button action-btn message-action-icon ${preferredResponseForMessage === 'original' ? 'branch-nav-active' : ''}`}
-                                onClick={() =>
-                                  handlePreferResponse(message.id, 'original', {
-                                    closeOverlay: false,
-                                    originalContent: responseOriginalContentForMessage,
-                                    branchContent: responseBranchContentForMessage,
-                                  })
-                                }
-                                title="Show Response 1"
-                                aria-label="Show Response 1"
+                                className={`ghost-button action-btn message-action-icon ${copiedMessageId === message.id ? 'copied' : ''}`}
+                                onClick={() => handleCopyMessage(message.id, userCopyText)}
+                                title={copiedMessageId === message.id ? 'Copied' : 'Copy prompt'}
+                                aria-label={copiedMessageId === message.id ? 'Copied' : 'Copy prompt'}
+                                disabled={!userCopyText.trim()}
                               >
-                                <ChevronLeft size={16} />
+                                {copiedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
                               </button>
-                              <button
-                                type="button"
-                                className={`ghost-button action-btn message-action-icon ${preferredResponseForMessage === 'branch' ? 'branch-nav-active' : ''}`}
-                                onClick={() =>
-                                  handlePreferResponse(message.id, 'branch', {
-                                    closeOverlay: false,
-                                    originalContent: responseOriginalContentForMessage,
-                                    branchContent: responseBranchContentForMessage,
-                                  })
-                                }
-                                title="Show Response 2"
-                                aria-label="Show Response 2"
-                              >
-                                <ChevronRight size={16} />
-                              </button>
-                            </>
-                          ) : (
+                            </div>
+                          </div>
+                        )}
+                      {!isAssistantResponseInProgress && message.role === 'assistant' && (
+                        <div className="message-actions message-actions-outside">
+                          {!((hasAssistantImage && hasImageVariant) || (!hasAssistantImage && hasBranchForMessage)) && (
                             <button
                               type="button"
-                              className={`ghost-button action-btn message-action-icon ${branchComparisons[message.id]?.loading ? 'reading' : ''}`}
+                              className="ghost-button action-btn message-action-icon"
                               onClick={() =>
-                                void handleBranchResponse(
+                                void handleRegenerateMessage(
                                   message.id,
                                   getMessageModel(message),
                                   message.content,
+                                  message.created_at,
                                 )
                               }
-                              title="Branch response"
-                              aria-label="Branch response"
-                              disabled={branchComparisons[message.id]?.loading}
+                              title="Regenerate"
+                              aria-label="Regenerate"
                             >
-                              {branchComparisons[message.id]?.loading ? (
+                              <RotateCcw size={16} />
+                            </button>
+                          )}
+                          {!hasAssistantImage && (
+                            <button
+                              type="button"
+                              className={`ghost-button action-btn message-action-icon ${copiedMessageId === message.id ? 'copied' : ''}`}
+                              onClick={() =>
+                                handleCopyMessage(
+                                  message.id,
+                                  message.role === 'assistant'
+                                    ? assistantDisplayContent
+                                    : parsedContent.text,
+                                )
+                              }
+                              title={copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                              aria-label={copiedMessageId === message.id ? 'Copied' : 'Copy'}
+                            >
+                              {copiedMessageId === message.id ? <Check size={16} /> : <Copy size={16} />}
+                            </button>
+                          )}
+                          {message.role === 'assistant' && (
+                            <>
+                              {(messageFeedback === null || messageFeedback === 'like') && (
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon message-feedback-button ${
+                                    messageFeedback === 'like' ? 'active-like' : ''
+                                  }`}
+                                  onClick={() => void handleMessageFeedback(message, 'like')}
+                                  title="Like"
+                                  aria-label="Like"
+                                  disabled={feedbackSavingMessageId === message.id}
+                                >
+                                  <ThumbsUp
+                                    size={16}
+                                    fill={messageFeedback === 'like' ? 'currentColor' : 'none'}
+                                  />
+                                </button>
+                              )}
+                              {(messageFeedback === null || messageFeedback === 'dislike') && (
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon message-feedback-button ${
+                                    messageFeedback === 'dislike' ? 'active-dislike' : ''
+                                  }`}
+                                  onClick={() => void handleMessageFeedback(message, 'dislike')}
+                                  title="Dislike"
+                                  aria-label="Dislike"
+                                  disabled={feedbackSavingMessageId === message.id}
+                                >
+                                  <ThumbsDown
+                                    size={16}
+                                    fill={messageFeedback === 'dislike' ? 'currentColor' : 'none'}
+                                  />
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {hasAssistantImage ? (
+                            <button
+                              type="button"
+                              className="ghost-button action-btn message-action-icon"
+                              onClick={() =>
+                                handleDownloadAssistantImage(effectiveAssistantImageSrc)
+                              }
+                              title="Download image"
+                              aria-label="Download image"
+                            >
+                              <Download size={16} />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`ghost-button action-btn message-action-icon ${readingMessageId === message.id ? 'reading' : ''}`}
+                              onClick={() => handleReadAloud(message.id, effectiveAssistantDisplayContent)}
+                              title={readingMessageId === message.id ? 'Reading...' : 'Read aloud'}
+                              aria-label={readingMessageId === message.id ? 'Reading' : 'Read aloud'}
+                            >
+                              {readingMessageId === message.id ? (
                                 <Loader2 size={16} className="action-icon-spin" />
                               ) : (
-                                <GitBranch size={16} />
+                                <Volume2 size={16} />
                               )}
                             </button>
-                          ))}
-                        <span className="message-model-pill" title="Model used">
-                          <Cpu size={16} />
-                          {messageModelLabel}
-                        </span>
-                      </div>
-                    )}
-                    </article>
+                          )}
+                          <button
+                            type="button"
+                            className="ghost-button action-btn message-action-icon"
+                            onClick={() =>
+                              void onShareMessage(
+                                message.role === 'assistant'
+                                  ? assistantDisplayContent
+                                  : parsedContent.text,
+                                hasAssistantImage ? effectiveAssistantImageSrc : undefined,
+                              )
+                            }
+                            title="Share"
+                            aria-label="Share"
+                          >
+                            <Share2 size={16} />
+                          </button>
+                          {hasAssistantImage &&
+                            (hasImageVariant ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon ${imagePreferred === 'original' ? 'branch-nav-active' : ''}`}
+                                  onClick={() =>
+                                    handlePreferImageResponse(
+                                      message.id,
+                                      'original',
+                                      message.content,
+                                      imageOriginalSrc,
+                                      effectiveVariantSrc,
+                                      imagePrompt,
+                                      { closeOverlay: false },
+                                    )
+                                  }
+                                  title="Show Response 1"
+                                  aria-label="Show Response 1"
+                                >
+                                  <ChevronLeft size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon ${imagePreferred === 'variant' ? 'branch-nav-active' : ''}`}
+                                  onClick={() =>
+                                    handlePreferImageResponse(
+                                      message.id,
+                                      'variant',
+                                      message.content,
+                                      imageOriginalSrc,
+                                      effectiveVariantSrc,
+                                      imagePrompt,
+                                      { closeOverlay: false },
+                                    )
+                                  }
+                                  title="Show Response 2"
+                                  aria-label="Show Response 2"
+                                >
+                                  <ChevronRight size={16} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon ${imageComparisons[message.id]?.loading ? 'reading' : ''}`}
+                                onClick={() =>
+                                  void handleGenerateImageVariant(message.id, message.content)
+                                }
+                                title="Generate Response 2"
+                                aria-label="Generate Response 2"
+                                disabled={imageComparisons[message.id]?.loading}
+                              >
+                                {imageComparisons[message.id]?.loading ? (
+                                  <Loader2 size={16} className="action-icon-spin" />
+                                ) : (
+                                  <GitBranch size={16} />
+                                )}
+                              </button>
+                            ))}
+                          {!hasAssistantImage &&
+                            (hasBranchForMessage ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon ${preferredResponseForMessage === 'original' ? 'branch-nav-active' : ''}`}
+                                  onClick={() =>
+                                    handlePreferResponse(message.id, 'original', {
+                                      closeOverlay: false,
+                                      originalContent: responseOriginalContentForMessage,
+                                      branchContent: responseBranchContentForMessage,
+                                    })
+                                  }
+                                  title="Show Response 1"
+                                  aria-label="Show Response 1"
+                                >
+                                  <ChevronLeft size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`ghost-button action-btn message-action-icon ${preferredResponseForMessage === 'branch' ? 'branch-nav-active' : ''}`}
+                                  onClick={() =>
+                                    handlePreferResponse(message.id, 'branch', {
+                                      closeOverlay: false,
+                                      originalContent: responseOriginalContentForMessage,
+                                      branchContent: responseBranchContentForMessage,
+                                    })
+                                  }
+                                  title="Show Response 2"
+                                  aria-label="Show Response 2"
+                                >
+                                  <ChevronRight size={16} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`ghost-button action-btn message-action-icon ${branchComparisons[message.id]?.loading ? 'reading' : ''}`}
+                                onClick={() =>
+                                  void handleBranchResponse(
+                                    message.id,
+                                    getMessageModel(message),
+                                    message.content,
+                                  )
+                                }
+                                title="Branch response"
+                                aria-label="Branch response"
+                                disabled={branchComparisons[message.id]?.loading}
+                              >
+                                {branchComparisons[message.id]?.loading ? (
+                                  <Loader2 size={16} className="action-icon-spin" />
+                                ) : (
+                                  <GitBranch size={16} />
+                                )}
+                              </button>
+                            ))}
+                          <span className="message-model-pill" title="Model used">
+                            <Cpu size={16} />
+                            {messageModelLabel}
+                          </span>
+                        </div>
+                      )}
+                      </article>
+                    </div>
                   )
                 })
               })()}
@@ -5489,18 +5791,20 @@ function ChatWorkspace({
             </div>
           )}
           {showScrollToLatest && (
-            <button
-              type="button"
-              className="scroll-to-latest-button"
-              onClick={() => {
-                setShowScrollToLatest(false)
-                smoothScrollToBottom(700)
-              }}
-              aria-label="Scroll to latest response"
-              title="Scroll to latest"
-            >
-              <ArrowDown size={18} />
-            </button>
+            <div className="scroll-to-latest-wrap">
+              <button
+                type="button"
+                className="scroll-to-latest-button"
+                onClick={() => {
+                  setShowScrollToLatest(false)
+                  smoothScrollToBottom(700)
+                }}
+                aria-label="Scroll to latest response"
+                title="Scroll to latest"
+              >
+                <ArrowDown size={18} />
+              </button>
+            </div>
           )}
           <div ref={endRef} />
         </main>
@@ -5558,7 +5862,13 @@ function ChatWorkspace({
               </button>
             </div>
           )}
-          <div className="composer">
+          <div
+            className="composer"
+            onDragEnter={handleComposerDragEnter}
+            onDragOver={handleComposerDragOver}
+            onDragLeave={handleComposerDragLeave}
+            onDrop={handleComposerDrop}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -5588,6 +5898,7 @@ function ChatWorkspace({
                   resizeComposerTextarea(target)
                   setDraft(event.target.value)
                 }}
+                onPaste={handleComposerPaste}
                 placeholder="Type your message..."
                 rows={1}
                 onKeyDown={(event) => {
@@ -5621,6 +5932,18 @@ function ChatWorkspace({
                   <Mic size={22} />
                 )}
               </button>
+            </div>
+            <div className={`composer-dropzone ${isDragActive ? 'active' : ''}`} aria-hidden="true">
+              <div className="composer-dropzone-ring" />
+              <div className="composer-dropzone-core">
+                <span className="composer-dropzone-icon">
+                  <ImagePlus size={20} />
+                </span>
+                <div className="composer-dropzone-text">
+                  <strong>Drop image to upload</strong>
+                  <span>Paste or drag files anywhere in the composer</span>
+                </div>
+              </div>
             </div>
             {showImageModal && previewImageUrl && (
               <div className="image-modal-overlay" onClick={() => setShowImageModal(false)}>
@@ -8314,13 +8637,13 @@ function App() {
   const onShareViaMessages = () => {
     if (!shareDialogData) return
     const payload = encodeURIComponent(`${shareDialogData.title}\n${shareDialogData.url}`)
-    openShareUrl(`sms:?&body=${payload}`)
+    openShareUrl(`sms:?body=${payload}`)
   }
 
   const onShareViaEmail = () => {
     if (!shareDialogData) return
     const subject = encodeURIComponent(`Shared chat: ${shareDialogData.title}`)
-    const body = encodeURIComponent(`${shareDialogData.title}\n\n${shareDialogData.url}`)
+    const body = encodeURIComponent(`${shareDialogData.url}\n\n${shareDialogData.title}`)
     openShareUrl(`mailto:?subject=${subject}&body=${body}`)
   }
 
@@ -8332,8 +8655,8 @@ function App() {
 
   const onShareViaTelegram = () => {
     if (!shareDialogData) return
-    const text = encodeURIComponent(shareDialogData.title)
     const url = encodeURIComponent(shareDialogData.url)
+    const text = encodeURIComponent(shareDialogData.title)
     openShareUrl(`https://t.me/share/url?url=${url}&text=${text}`)
   }
 
@@ -8344,7 +8667,7 @@ function App() {
       try {
         await navigator.share({
           title: shareDialogData.title,
-          text: shareDialogData.title,
+          text: `${shareDialogData.title}\n${shareDialogData.url}`,
           url: shareDialogData.url,
         })
         showNotice('Conversation shared.')
@@ -8605,6 +8928,7 @@ function App() {
   useEffect(() => {
     if (!session?.user?.id) return
 
+    let active = true
     const keyPrefix = session.user.id
     setSettingsHydrated(false)
     const storedName = localStorage.getItem(`display-name:${keyPrefix}`)
@@ -8658,6 +8982,10 @@ function App() {
     setPromptCards(pickRandomPrompts(resolvedPurpose, resolvedSuggestionCount))
 
     void loadUserSettingsFromDb(keyPrefix)
+
+    return () => {
+      active = false
+    }
   }, [session?.user?.id, supabase, loadUserSettingsFromDb])
 
   useEffect(() => {
