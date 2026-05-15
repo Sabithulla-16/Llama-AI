@@ -50,7 +50,7 @@ inferred as (
       case
         when c.payload is not null
          and jsonb_typeof(c.payload) = 'object'
-         and lower(coalesce(c.payload->>'model', '')) in ('llama', 'qwen', 'coder', 'mini', 'smart', 'image', 'blimp', 'sd-turbo')
+         and lower(coalesce(c.payload->>'model', '')) in ('llama', 'qwen', 'coder', 'mini', 'smart', 'fast', 'image', 'blimp', 'sd-turbo')
         then lower(c.payload->>'model')
       end,
       -- In branch flows, inherit from the parent assistant when available.
@@ -86,7 +86,7 @@ set
   model_used = i.inferred_model,
   model = case
     -- model column supports only text-model subset by schema constraint.
-    when i.inferred_model in ('llama', 'qwen', 'coder', 'mini', 'smart')
+    when i.inferred_model in ('llama', 'qwen', 'coder', 'mini', 'smart', 'fast')
       then coalesce(m.model, i.inferred_model)
     else m.model
   end
@@ -99,6 +99,6 @@ update public.messages
 set model = model_used
 where role = 'assistant'
   and model is null
-  and model_used in ('llama', 'qwen', 'coder', 'mini', 'smart');
+  and model_used in ('llama', 'qwen', 'coder', 'mini', 'smart', 'fast');
 
 select pg_notify('pgrst', 'reload schema');

@@ -111,13 +111,14 @@ type ChatMessage = {
   branch_id?: number | null
   model?: AIModel | null
   model_used?: AIModel | null
+  generation_ms?: number | null
   created_at: string
 }
 
 type ThemeMode = 'light' | 'dark'
 type ResponseStyle = 'balanced' | 'concise' | 'detailed'
 type PromptPurpose = 'general' | 'coding' | 'business' | 'study' | 'writing'
-type TextAIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart'
+type TextAIModel = 'llama' | 'qwen' | 'coder' | 'mini' | 'smart' | 'fast'
 type ComposerModel = TextAIModel | 'image'
 type AIModel = ComposerModel | 'blimp' | 'sd-turbo'
 type VoiceLanguage = 'en-US' | 'en-GB'
@@ -190,6 +191,12 @@ const API_BASE =
 const IMAGE_GEN_API_BASE =
   ((import.meta.env.VITE_IMAGE_GEN_API_BASE_URL as string | undefined) ||
     'https://valtry-llama-img-gen.hf.space').replace(/\/+$/, '')
+const FAST_API_BASE =
+  ((import.meta.env.VITE_FAST_API_BASE_URL as string | undefined) ||
+    'https://Valtry-llama-fast.hf.space').replace(/\/+$/, '')
+const CODER_API_BASE =
+  ((import.meta.env.VITE_CODER_API_BASE_URL as string | undefined) ||
+    'https://sabithulla-llama-coder.hf.space').replace(/\/+$/, '')
 const CODE_RUNNER_API =
   ((import.meta.env.VITE_CODE_RUNNER_STREAM_API as string | undefined) ||
     'https://code-runner-5ov9.onrender.com')
@@ -205,21 +212,31 @@ const CODE_RUNNER_STREAM_API = CODE_RUNNER_API.endsWith('/run/stream')
   : `${CODE_RUNNER_API}/run/stream`
 const STOP_API = `${API_BASE}/v1/stop`
 const IMAGE_GEN_STOP_API = `${IMAGE_GEN_API_BASE}/v1/stop`
+const FAST_STOP_API = `${FAST_API_BASE}/v1/stop`
+const CODER_STOP_API = `${CODER_API_BASE}/v1/stop`
 const FEEDBACK_API_TARGETS = Array.from(
-  new Set([`${API_BASE}/v1/feedback`, `${IMAGE_GEN_API_BASE}/v1/feedback`]),
+  new Set([
+    `${API_BASE}/v1/feedback`,
+    `${IMAGE_GEN_API_BASE}/v1/feedback`,
+    `${CODER_API_BASE}/v1/feedback`,
+  ]),
 )
 const IMAGE_STREAM_API = `${API_BASE}/v1/chat/image/stream`
 const IMAGE_GENERATE_API = `${IMAGE_GEN_API_BASE}/generate`
+const FAST_STREAM_API = `${FAST_API_BASE}/v1/chat/stream`
+const CODER_STREAM_API = `${CODER_API_BASE}/v1/chat/stream`
 const MODEL_ENDPOINTS: Record<TextAIModel, string> = {
   llama: '/v1/chat/llama',
   qwen: '/v1/chat/qwen',
   coder: '/v1/chat/coder',
   mini: '/v1/chat/mini',
   smart: '/v1/chat/smart',
+  fast: '/v1/chat/stream',
 }
 const MODEL_ENGINE_LABELS: Record<AIModel, string> = {
   llama: 'Llama',
   qwen: 'Qwen',
+  fast: 'Qwen',
   coder: 'Coder',
   mini: 'Mini',
   smart: 'Smart',
@@ -231,17 +248,14 @@ const MODEL_ENGINE_LABELS: Record<AIModel, string> = {
 const COMPOSER_MODEL_LABELS: Record<ComposerModel, string> = {
   llama: 'Llama',
   qwen: 'Qwen',
+  fast: 'Fast',
   coder: 'Coder',
   mini: 'Mini',
   smart: 'Smart',
   image: 'Image',
 }
 
-const COMPOSER_MODEL_OPTIONS: ComposerModel[] = ['llama', 'coder', 'image']
-const MOBILE_SIDEBAR_BREAKPOINT = 960
-const SIDEBAR_SWIPE_MIN_DISTANCE_PX = 40
-const SIDEBAR_SWIPE_MAX_VERTICAL_DRIFT_PX = 140
-const SIDEBAR_HORIZONTAL_BIAS = 1
+const COMPOSER_MODEL_OPTIONS: ComposerModel[] = ['llama', 'fast', 'coder', 'image']
 
 const isAIModel = (value: unknown): value is AIModel =>
   typeof value === 'string' && value in MODEL_ENGINE_LABELS
@@ -254,6 +268,12 @@ const isComposerModel = (value: unknown): value is ComposerModel =>
 
 const isFeedbackValue = (value: unknown): value is FeedbackValue =>
   value === 'like' || value === 'dislike'
+
+const getTextModelApiUrl = (model: TextAIModel) => {
+  if (model === 'fast') return FAST_STREAM_API
+  if (model === 'coder') return CODER_STREAM_API
+  return `${API_BASE}${MODEL_ENDPOINTS[model]}`
+}
 
 const getMessageModel = (message: ChatMessage): AIModel | null => {
   const candidate = message.model_used ?? message.model
@@ -773,8 +793,30 @@ const formatMessageDateLabel = (date: Date, now = new Date()) => {
   const timeLabel = new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
   }).format(date)
   return `${dateLabel} • ${timeLabel}`
+}
+
+const formatGenerationDuration = (durationMs: number) => {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return ''
+  const seconds = durationMs / 1000
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds - minutes * 60
+  return `${minutes}m ${remainder.toFixed(1)}s`
+}
+
+const formatCompletionTime = (startedAtIso: string, durationMs: number) => {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return ''
+  const startedAt = new Date(startedAtIso)
+  if (Number.isNaN(startedAt.getTime())) return ''
+  const completedAt = new Date(startedAt.getTime() + durationMs)
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(completedAt)
 }
 
 
@@ -1044,6 +1086,7 @@ async function streamCompletion(
     user_id: string
     conversation_id: string
     messages: Pick<ChatMessage, 'role' | 'content'>[]
+    message?: string
     temperature?: number
     max_tokens?: number
     stream?: boolean
@@ -1063,6 +1106,8 @@ async function streamCompletion(
     body: JSON.stringify({
       user_id: payload.user_id,
       conversation_id: payload.conversation_id,
+      message:
+        payload.message || payload.messages[payload.messages.length - 1]?.content || '',
       messages: payload.messages,
       temperature: payload.temperature ?? 0.7,
       max_tokens: payload.max_tokens ?? 512,
@@ -2312,12 +2357,7 @@ function LandingPage({ session }: LandingPageProps) {
           <p>Llama AI</p>
         </div>
 
-        <nav className="landing-nav" aria-label="Primary">
-          <span>Chat</span>
-          <span>Features</span>
-          <span>Pricing</span>
-          <span>Resources</span>
-        </nav>
+        <nav className="landing-nav" aria-label="Primary" />
 
         <div className="landing-topbar-actions">
           <button className="landing-topbar-link" type="button" onClick={secondaryAction}>
@@ -2492,6 +2532,7 @@ type ChatWorkspaceProps = {
   titleLoadingByConversationId: Record<string, boolean>
   titleRevealByConversationId: Record<string, boolean>
   activeConversationModel: AIModel
+  generationDurationByMessageId: Record<string, number>
   activeMessages: ChatMessage[]
   scrollAnchorMessageId: string | null
   promptCards: string[]
@@ -2540,6 +2581,7 @@ function ChatWorkspace({
   titleLoadingByConversationId,
   titleRevealByConversationId,
   activeConversationModel,
+  generationDurationByMessageId,
   activeMessages,
   scrollAnchorMessageId,
   promptCards,
@@ -2821,6 +2863,8 @@ function ChatWorkspace({
   const isGeneratingRef = useRef(isGenerating)
   const lastScrollTopRef = useRef(0)
   const hasScrolledUpRef = useRef(false)
+  const showScrollToLatestRef = useRef(false)
+  const scrollVisibilityRafRef = useRef<number | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [feedbackByMessageId, setFeedbackByMessageId] = useState<
     Record<string, FeedbackValue>
@@ -2829,17 +2873,6 @@ function ChatWorkspace({
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   const dragCounterRef = useRef(0)
-  const sidebarSwipeRef = useRef<{
-    startX: number
-    startY: number
-    mode: 'open' | 'close' | null
-    triggered: boolean
-  }>({
-    startX: 0,
-    startY: 0,
-    mode: null,
-    triggered: false,
-  })
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [showImageModal, setShowImageModal] = useState(false)
@@ -3019,95 +3052,6 @@ function ChatWorkspace({
     }
   }, [imageVariantRecords, imageVariantStorageKey])
 
-  const isMobileSidebarSwipeEnabled = () => window.innerWidth <= MOBILE_SIDEBAR_BREAKPOINT
-
-  const isHorizontalSidebarSwipe = (deltaX: number, deltaY: number) => {
-    const absDeltaX = Math.abs(deltaX)
-    const absDeltaY = Math.abs(deltaY)
-    return (
-      absDeltaX >= SIDEBAR_SWIPE_MIN_DISTANCE_PX &&
-      absDeltaY <= SIDEBAR_SWIPE_MAX_VERTICAL_DRIFT_PX &&
-      absDeltaX >= absDeltaY * SIDEBAR_HORIZONTAL_BIAS
-    )
-  }
-
-  const handleWorkspaceTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length !== 1 || !isMobileSidebarSwipeEnabled()) {
-      sidebarSwipeRef.current = {
-        startX: 0,
-        startY: 0,
-        mode: null,
-        triggered: false,
-      }
-      return
-    }
-
-    const touch = event.touches[0]
-    sidebarSwipeRef.current = {
-      startX: touch.clientX,
-      startY: touch.clientY,
-      mode: sidebarOpen ? 'close' : 'open',
-      triggered: false,
-    }
-  }
-
-  const handleWorkspaceTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (!isMobileSidebarSwipeEnabled() || event.touches.length === 0) {
-      return
-    }
-
-    const swipeState = sidebarSwipeRef.current
-    const { startX, startY, mode, triggered } = swipeState
-    if (!mode || triggered) return
-
-    const touch = event.touches[0]
-    const deltaX = touch.clientX - startX
-    const deltaY = Math.abs(touch.clientY - startY)
-
-    if (!isHorizontalSidebarSwipe(deltaX, deltaY)) return
-
-    if (mode === 'open' && deltaX > 0) {
-      setSidebarOpen(true)
-      swipeState.triggered = true
-    } else if (mode === 'close' && deltaX < 0) {
-      setSidebarOpen(false)
-      swipeState.triggered = true
-    }
-  }
-
-  const handleWorkspaceTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (!isMobileSidebarSwipeEnabled() || event.changedTouches.length === 0) {
-      sidebarSwipeRef.current.mode = null
-      sidebarSwipeRef.current.triggered = false
-      return
-    }
-
-    const { startX, startY, mode, triggered } = sidebarSwipeRef.current
-    if (!mode || triggered) {
-      sidebarSwipeRef.current.mode = null
-      sidebarSwipeRef.current.triggered = false
-      return
-    }
-
-    const touch = event.changedTouches[0]
-    const deltaX = touch.clientX - startX
-    const deltaY = Math.abs(touch.clientY - startY)
-    if (isHorizontalSidebarSwipe(deltaX, deltaY)) {
-      if (mode === 'open' && deltaX > 0) {
-        setSidebarOpen(true)
-      } else if (mode === 'close' && deltaX < 0) {
-        setSidebarOpen(false)
-      }
-    }
-
-    sidebarSwipeRef.current.mode = null
-    sidebarSwipeRef.current.triggered = false
-  }
-
-  const handleWorkspaceTouchCancel = () => {
-    sidebarSwipeRef.current.mode = null
-    sidebarSwipeRef.current.triggered = false
-  }
 
   const clearSelectedImage = () => {
     setSelectedImageFile(null)
@@ -3469,7 +3413,10 @@ function ChatWorkspace({
   const updateScrollToLatestVisibility = () => {
     const container = messageScrollRef.current
     if (!container || visibleMessages.length === 0) {
-      setShowScrollToLatest(false)
+      if (showScrollToLatestRef.current) {
+        showScrollToLatestRef.current = false
+        setShowScrollToLatest(false)
+      }
       return
     }
 
@@ -3481,21 +3428,34 @@ function ChatWorkspace({
       container.scrollHeight - (container.scrollTop + container.clientHeight)
 
     if (distanceFromBottom <= 120) {
-      setShowScrollToLatest(false)
+      if (showScrollToLatestRef.current) {
+        showScrollToLatestRef.current = false
+        setShowScrollToLatest(false)
+      }
       hasScrolledUpRef.current = false
       lastScrollTopRef.current = currentTop
       return
     }
 
+    let nextShow = showScrollToLatestRef.current
     if (isScrollingUp) {
       hasScrolledUpRef.current = true
-      setShowScrollToLatest(false)
+      nextShow = false
     } else if (isScrollingDown && hasScrolledUpRef.current) {
-      setShowScrollToLatest(true)
+      nextShow = true
+    }
+
+    if (nextShow !== showScrollToLatestRef.current) {
+      showScrollToLatestRef.current = nextShow
+      setShowScrollToLatest(nextShow)
     }
 
     lastScrollTopRef.current = currentTop
   }
+
+  useEffect(() => {
+    showScrollToLatestRef.current = showScrollToLatest
+  }, [showScrollToLatest])
 
   useEffect(() => {
     const textarea = composerTextareaRef.current
@@ -3572,15 +3532,24 @@ function ChatWorkspace({
     if (!container) return
 
     const onScroll = () => {
-      updateScrollToLatestVisibility()
+      if (scrollVisibilityRafRef.current) return
+      scrollVisibilityRafRef.current = window.requestAnimationFrame(() => {
+        scrollVisibilityRafRef.current = null
+        updateScrollToLatestVisibility()
+      })
     }
 
     lastScrollTopRef.current = container.scrollTop
     hasScrolledUpRef.current = false
+    showScrollToLatestRef.current = false
     setShowScrollToLatest(false)
     container.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       container.removeEventListener('scroll', onScroll)
+      if (scrollVisibilityRafRef.current) {
+        window.cancelAnimationFrame(scrollVisibilityRafRef.current)
+        scrollVisibilityRafRef.current = null
+      }
     }
   }, [activeConversationId, isGenerating, visibleMessages.length])
 
@@ -4235,8 +4204,7 @@ function ChatWorkspace({
       return
     }
 
-    const endpoint = isTextAIModel(modelToUse) ? MODEL_ENDPOINTS[modelToUse] : null
-    const apiUrl = endpoint ? `${API_BASE}${endpoint}` : null
+    const apiUrl = isTextAIModel(modelToUse) ? getTextModelApiUrl(modelToUse) : null
     const controller = new AbortController()
     branchAbortControllersRef.current[messageId] = controller
     let branchBuffer = ''
@@ -4325,7 +4293,8 @@ function ChatWorkspace({
             user_id: currentUserId,
             conversation_id: targetMessage.conversation_id,
             messages: [{ role: 'user', content: branchPrompt }],
-            temperature: 0.7,
+            message: branchPrompt,
+            temperature: modelToUse === 'coder' ? 0.1 : 0.7,
             max_tokens: 512,
             stream: true,
             branch: true,
@@ -4742,13 +4711,7 @@ function ChatWorkspace({
   }
 
   return (
-    <div
-      className="app-shell"
-      onTouchStart={handleWorkspaceTouchStart}
-      onTouchMove={handleWorkspaceTouchMove}
-      onTouchEnd={handleWorkspaceTouchEnd}
-      onTouchCancel={handleWorkspaceTouchCancel}
-    >
+    <div className="app-shell">
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''} ${isGenerating ? 'streaming' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-brand">
@@ -5323,6 +5286,20 @@ function ChatWorkspace({
                           messageModel || (hasAssistantImage ? 'sd-turbo' : 'llama')
                         ]
                       : MODEL_ENGINE_LABELS.llama
+                  const generationDurationMs =
+                    message.role === 'assistant'
+                      ? generationDurationByMessageId[message.id] ?? message.generation_ms ?? undefined
+                      : undefined
+                  const generationDurationLabel =
+                    typeof generationDurationMs === 'number'
+                      ? formatGenerationDuration(generationDurationMs)
+                      : ''
+                  const isAssistantLive =
+                    message.role === 'assistant' && (isPendingAssistant || isAssistantResponseInProgress)
+                  const completionTimeLabel =
+                    !isAssistantLive && typeof generationDurationMs === 'number'
+                      ? formatCompletionTime(message.created_at, generationDurationMs)
+                      : ''
 
                   if (message.role === 'assistant') {
                     if (isVariantOnlyRootImage) {
@@ -5426,6 +5403,12 @@ function ChatWorkspace({
                               alt="Llama AI"
                             />
                             <div className={`bubble assistant ${hasAssistantImage || isImageGenerationPending ? 'with-image' : ''}`}>
+                              {generationDurationLabel && (
+                                <div className="assistant-duration">
+                                  Time taken: {generationDurationLabel}
+                                  {completionTimeLabel ? ` · Completed ${completionTimeLabel}` : ''}
+                                </div>
+                              )}
                               {isPendingAssistant ? (
                                 isImageGenerationPending ? (
                                   <ImageGenerationPlaceholder
@@ -7983,6 +7966,18 @@ function SharedConversationView() {
                   message.role === 'assistant'
                     ? MODEL_ENGINE_LABELS[messageModel || (hasAssistantImage ? 'sd-turbo' : 'llama')]
                     : MODEL_ENGINE_LABELS.llama
+                const sharedGenerationDurationMs =
+                  message.role === 'assistant'
+                    ? message.generation_ms ?? undefined
+                    : undefined
+                const sharedGenerationDurationLabel =
+                  typeof sharedGenerationDurationMs === 'number'
+                    ? formatGenerationDuration(sharedGenerationDurationMs)
+                    : ''
+                const sharedCompletionTimeLabel =
+                  typeof sharedGenerationDurationMs === 'number'
+                    ? formatCompletionTime(message.created_at, sharedGenerationDurationMs)
+                    : ''
 
                 if (message.role === 'assistant') {
                   if (isSharedVariantOnlyRootImage) {
@@ -8071,6 +8066,12 @@ function SharedConversationView() {
                           alt="Llama AI"
                         />
                         <div className={`bubble assistant ${hasAssistantImage ? 'with-image' : ''}`}>
+                          {sharedGenerationDurationLabel && (
+                            <div className="assistant-duration">
+                              Time taken: {sharedGenerationDurationLabel}
+                              {sharedCompletionTimeLabel ? ` · Completed ${sharedCompletionTimeLabel}` : ''}
+                            </div>
+                          )}
                           {hasAssistantImage ? (
                             <div className="message-image-card assistant-generated-image-card">
                               <ProgressiveImage
@@ -8364,6 +8365,12 @@ function App() {
   const [imageDataMap, setImageDataMap] = useState<Record<string, string>>({})
   const [imageTagDataMap, setImageTagDataMap] = useState<Record<string, string>>({})
   const [imagePromptDataMap, setImagePromptDataMap] = useState<Record<string, string[]>>({})
+  const [generationDurationByMessageId, setGenerationDurationByMessageId] = useState<
+    Record<string, number>
+  >({})
+  const [generationStartByMessageId, setGenerationStartByMessageId] = useState<
+    Record<string, number>
+  >({})
   const [scrollAnchorMessageId, setScrollAnchorMessageId] = useState<string | null>(null)
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState<string | null>(null)
   const [pendingClearChats, setPendingClearChats] = useState(false)
@@ -8386,6 +8393,7 @@ function App() {
 
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const activeStopTargetsRef = useRef<string[]>([])
   const noticeTimerRef = useRef<number | null>(null)
   const pendingGenerationKey = session?.user?.id
     ? `pending-generation:${session.user.id}`
@@ -8887,6 +8895,53 @@ function App() {
     }
     return selectedModel
   }, [activeConversationId, messagesMap, selectedModel])
+
+  useEffect(() => {
+    if (Object.keys(generationStartByMessageId).length === 0) return
+
+    const interval = window.setInterval(() => {
+      const now = performance.now()
+      setGenerationDurationByMessageId((prev) => {
+        let changed = false
+        const next = { ...prev }
+        for (const [messageId, startedAt] of Object.entries(generationStartByMessageId)) {
+          const elapsed = Math.max(0, now - startedAt)
+          if (next[messageId] !== elapsed) {
+            next[messageId] = elapsed
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }, 100)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [generationStartByMessageId])
+
+  useEffect(() => {
+    const updates: Record<string, number> = {}
+    Object.values(messagesMap).flat().forEach((message) => {
+      if (typeof message.generation_ms === 'number') {
+        updates[message.id] = message.generation_ms
+      }
+    })
+
+    if (Object.keys(updates).length === 0) return
+
+    setGenerationDurationByMessageId((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const [id, value] of Object.entries(updates)) {
+        if (next[id] !== value) {
+          next[id] = value
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [messagesMap])
 
   useEffect(() => {
     const userId = session?.user?.id
@@ -9432,6 +9487,7 @@ function App() {
     model: AIModel,
     assistantContent: string,
     assistantCreatedAt?: string,
+    generationDurationMs?: number,
   ) => {
     if (!supabase) return
 
@@ -9480,19 +9536,23 @@ function App() {
       if (targetAssistantId) {
         const { error: writeBothError } = await supabase
           .from('messages')
-          .update({ model: model, model_used: model })
+          .update({
+            model: model,
+            model_used: model,
+            generation_ms: generationDurationMs ?? null,
+          })
           .eq('id', targetAssistantId)
 
         if (writeBothError) {
           const { error: modelOnlyError } = await supabase
             .from('messages')
-            .update({ model })
+            .update({ model, generation_ms: generationDurationMs ?? null })
             .eq('id', targetAssistantId)
 
           if (modelOnlyError) {
             await supabase
               .from('messages')
-              .update({ model_used: model })
+              .update({ model_used: model, generation_ms: generationDurationMs ?? null })
               .eq('id', targetAssistantId)
           }
         }
@@ -9501,10 +9561,17 @@ function App() {
           ...prev,
           [conversationId]: (prev[conversationId] || []).map((message) =>
             message.id === targetAssistantId
-              ? { ...message, model, model_used: model }
+              ? { ...message, model, model_used: model, generation_ms: generationDurationMs ?? null }
               : message,
           ),
         }))
+
+        if (typeof generationDurationMs === 'number') {
+          setGenerationDurationByMessageId((prev) => ({
+            ...prev,
+            [targetAssistantId]: generationDurationMs,
+          }))
+        }
 
         return
       }
@@ -9762,6 +9829,15 @@ function App() {
     setActiveConversationId(conversationId)
     markPendingGeneration(conversationId)
 
+    activeStopTargetsRef.current =
+      responseModel === 'fast'
+        ? [FAST_STOP_API]
+        : responseModel === 'coder'
+        ? [CODER_STOP_API]
+        : responseModel === 'sd-turbo'
+        ? [IMAGE_GEN_STOP_API]
+        : [STOP_API, IMAGE_GEN_STOP_API]
+
     navigate(`/chat/${slugify(promptForRequest)}?c=${conversationId}`)
 
     if (isRegenerate && replaceAssistantMessageId) {
@@ -9871,6 +9947,7 @@ function App() {
     let assistantBuffer = ''
     let finalAssistantContent = ''
     let generationAborted = false
+    const generationStartedAt = performance.now()
 
     const assistantMessage: ChatMessage = {
       id: assistantId,
@@ -9885,6 +9962,14 @@ function App() {
     setMessagesMap((prev) => ({
       ...prev,
       [conversationId]: [...(prev[conversationId] || []), assistantMessage],
+    }))
+    setGenerationStartByMessageId((prev) => ({
+      ...prev,
+      [assistantId]: performance.now(),
+    }))
+    setGenerationDurationByMessageId((prev) => ({
+      ...prev,
+      [assistantId]: 0,
     }))
 
     const controller = new AbortController()
@@ -10003,15 +10088,15 @@ function App() {
           return
         }
 
-        const endpoint = MODEL_ENDPOINTS[responseModel]
-        const apiUrl = `${API_BASE}${endpoint}`
+        const apiUrl = getTextModelApiUrl(responseModel)
         await streamCompletion(
           apiUrl,
           {
             user_id: session.user.id,
             conversation_id: conversationId,
             messages: [{ role: 'user', content: promptForRequest }],
-            temperature: 0.7,
+            message: promptForRequest,
+            temperature: responseModel === 'coder' ? 0.1 : 0.7,
             max_tokens: 512,
             stream: true,
           },
@@ -10058,6 +10143,13 @@ function App() {
       setImageCreateStatus(null)
       setIsThinking(false)
       abortRef.current = null
+      activeStopTargetsRef.current = []
+      setGenerationStartByMessageId((prev) => {
+        if (!prev[assistantId]) return prev
+        const next = { ...prev }
+        delete next[assistantId]
+        return next
+      })
       clearPendingGeneration(conversationId)
       if (isRegenerate && regeneratePromptContent) {
         await deleteDuplicateRegeneratePrompt(
@@ -10067,11 +10159,20 @@ function App() {
         )
       }
       if (!generationAborted && finalAssistantContent.trim()) {
+        const generationDurationMs = Math.max(
+          0,
+          Math.round(performance.now() - generationStartedAt),
+        )
+        setGenerationDurationByMessageId((prev) => ({
+          ...prev,
+          [assistantId]: generationDurationMs,
+        }))
         await persistModelForAssistantMessage(
           conversationId,
           responseModel,
           finalAssistantContent,
           assistantMessage.created_at,
+          generationDurationMs,
         )
       }
       await refreshMessages(conversationId, true)
@@ -10090,7 +10191,9 @@ function App() {
       try {
         if (conversationId) {
           const stopTargets =
-            STOP_API === IMAGE_GEN_STOP_API
+            activeStopTargetsRef.current.length > 0
+              ? activeStopTargetsRef.current
+              : STOP_API === IMAGE_GEN_STOP_API
               ? [STOP_API]
               : [STOP_API, IMAGE_GEN_STOP_API]
 
@@ -10424,6 +10527,7 @@ function App() {
                 titleLoadingByConversationId={titleLoadingByConversationId}
                 titleRevealByConversationId={titleRevealByConversationId}
                 activeConversationModel={activeConversationModel}
+                generationDurationByMessageId={generationDurationByMessageId}
                 activeMessages={activeMessages}
                 scrollAnchorMessageId={scrollAnchorMessageId}
                 promptCards={promptCards}

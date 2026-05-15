@@ -2579,6 +2579,14 @@ textarea:focus {
   min-width: 0;
 }
 
+.assistant-duration {
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--muted) 88%, var(--text));
+}
+
 .bubble p {
   margin: 0;
   overflow-wrap: anywhere;
@@ -3496,9 +3504,9 @@ textarea:focus {
 
 .composer-model-buttons {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  padding: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  padding: 5px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--brand) 24%, var(--border));
   background:
@@ -5916,6 +5924,7 @@ textarea {
     z-index: 20;
     transition: transform 0.25s ease;
     pointer-events: none;
+    will-change: transform;
   }
 
   .conversation-list {
@@ -5933,6 +5942,12 @@ textarea {
   .sidebar.open {
     transform: translateX(0);
     pointer-events: auto;
+  }
+
+  .sidebar,
+  .chat-pane {
+    backdrop-filter: none;
+    box-shadow: 0 16px 32px -26px rgba(12, 22, 38, 0.32);
   }
 
   .chat-pane {
@@ -6206,7 +6221,7 @@ textarea {
   }
 
   .composer-model-buttons {
-    gap: 6px;
+    gap: 5px;
   }
 
   .composer-model-button {
@@ -6513,7 +6528,7 @@ textarea {
   }
 
   .composer-model-buttons {
-    gap: 6px;
+    gap: 5px;
   }
 
   .composer-model-button {

@@ -18,8 +18,9 @@ create table if not exists public.messages (
   parent_id uuid references public.messages(id) on delete set null,
   branch_id integer,
   feedback text check (feedback in ('like', 'dislike')),
-  model text check (model in ('llama', 'qwen', 'coder', 'mini', 'smart')),
+  model text check (model in ('llama', 'qwen', 'coder', 'mini', 'smart', 'fast')),
   model_used text,
+  generation_ms integer,
   created_at timestamptz not null default now()
 );
 
@@ -68,10 +69,13 @@ begin
 end $$;
 
 alter table public.messages
-  add column if not exists model text check (model in ('llama', 'qwen', 'coder', 'mini', 'smart'));
+  add column if not exists model text check (model in ('llama', 'qwen', 'coder', 'mini', 'smart', 'fast'));
 
 alter table public.messages
   add column if not exists model_used text;
+
+alter table public.messages
+  add column if not exists generation_ms integer;
 
 alter table public.messages
   add column if not exists parent_id uuid references public.messages(id) on delete set null;
