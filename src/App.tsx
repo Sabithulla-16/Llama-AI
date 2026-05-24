@@ -9130,7 +9130,7 @@ function App() {
     }
 
     void poll()
-    const interval = window.setInterval(poll, 3000)
+    const interval = window.setInterval(poll, 8000)
 
     return () => {
       active = false
@@ -9543,14 +9543,16 @@ function App() {
   const refreshMessages = async (
     conversationId: string,
     preserveStreamedMessages = false,
+    _retryCount = 0,
   ) => {
-    if (!supabase) return
+    if (_retryCount > 2 || !supabase) return
 
     const { data, error: loadError } = await supabase
       .from('messages')
       .select('*')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true })
+      .limit(100)
 
     if (loadError) {
       setError(loadError.message)
@@ -9612,7 +9614,7 @@ function App() {
 
     if (skippedUpdate) {
       window.setTimeout(() => {
-        void refreshMessages(conversationId, true)
+        void refreshMessages(conversationId, true, _retryCount + 1)
       }, 450)
     } else {
       const remappedImageEntries = mapImageDataToFetchedMessageIds(
@@ -9630,7 +9632,7 @@ function App() {
 
       if (preserveStreamedMessages && needsAssistantRetry) {
         window.setTimeout(() => {
-          void refreshMessages(conversationId, true)
+          void refreshMessages(conversationId, true, _retryCount + 1)
         }, 450)
       }
     }
@@ -9647,8 +9649,8 @@ function App() {
   ) => {
     if (!supabase) return
 
-    const attempts = 20
-    const retryDelayMs = 300
+    const attempts = 5
+    const retryDelayMs = 800
     const normalizedContent = cleanAssistantOutput(assistantContent).trim()
 
     const getComparableAssistantText = (content: string) => {

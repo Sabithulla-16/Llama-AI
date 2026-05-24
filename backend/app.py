@@ -13,6 +13,8 @@ import time
 from typing import Optional
 
 from orchestrator.api import router as orchestration_router
+from orchestrator.auth_api import router as auth_router
+from orchestrator.data_api import router as data_router
 from orchestrator.config import get_allowed_origins
 from orchestrator.health import health_monitor
 
@@ -27,6 +29,8 @@ app.add_middleware(
 )
 
 app.include_router(orchestration_router)
+app.include_router(auth_router)
+app.include_router(data_router)
 
 
 @app.on_event("startup")
