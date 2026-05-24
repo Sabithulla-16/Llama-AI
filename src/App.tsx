@@ -4,6 +4,12 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { createClient } from '@supabase/supabase-js'
 import type { Session } from '@supabase/supabase-js'
+import { App as CapacitorApp } from '@capacitor/app'
+import { Browser } from '@capacitor/browser'
+import { Capacitor } from '@capacitor/core'
+import type { PluginListenerHandle } from '@capacitor/core'
+import { Keyboard as CapacitorKeyboard, KeyboardResize } from '@capacitor/keyboard'
+import { StatusBar, Style as StatusBarStyle } from '@capacitor/status-bar'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import type { IconType } from 'react-icons'
@@ -818,6 +824,20 @@ const formatCompletionTime = (startedAtIso: string, durationMs: number) => {
     hour12: true,
   }).format(completedAt)
 }
+
+const webAuthRedirectUrl =
+  (import.meta.env.VITE_SUPABASE_REDIRECT_URL_WEB as string | undefined) || null
+const mobileAuthRedirectUrl =
+  (import.meta.env.VITE_SUPABASE_REDIRECT_URL_MOBILE as string | undefined) ||
+  'com.llama.ai://auth/callback'
+
+const publicShareBaseUrl =
+  (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) || null
+
+const getAuthRedirectUrl = (isNative: boolean) =>
+  isNative
+    ? mobileAuthRedirectUrl
+    : webAuthRedirectUrl || `${window.location.origin}/chat`
 
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
@@ -2057,15 +2077,28 @@ function AuthScreen() {
   const onGoogle = async () => {
     if (!supabase) return
     setPending(true)
-    const { error } = await supabase.auth.signInWithOAuth({
+    const isNativeApp = Capacitor.isNativePlatform()
+    const redirectTo = getAuthRedirectUrl(isNativeApp)
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/chat`,
+        redirectTo,
+        skipBrowserRedirect: isNativeApp,
       },
     })
 
     if (error) {
       showAuthPopup('error', normalizeAuthError(error.message, false))
+      setPending(false)
+      return
+    }
+
+    if (isNativeApp && data?.url) {
+      try {
+        await Browser.open({ url: data.url })
+      } catch {
+        showAuthPopup('error', 'Could not open the browser for Google sign-in.')
+      }
     }
     setPending(false)
   }
@@ -8319,6 +8352,7 @@ function SharedConversationView() {
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
+  const isNativeApp = useMemo(() => Capacitor.isNativePlatform(), [])
   const [session, setSession] = useState<Session | null>(null)
   const [booting, setBooting] = useState(true)
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -8541,7 +8575,8 @@ function App() {
   }
 
   const getConversationLink = (shareToken: string) => {
-    const url = new URL(window.location.href)
+    const base = publicShareBaseUrl || window.location.origin
+    const url = new URL(base)
     url.pathname = `/shared/${encodeURIComponent(shareToken)}`
     url.search = ''
     url.hash = ''
@@ -9103,6 +9138,70 @@ function App() {
     }
   }, [session?.user?.id, supabase, pendingGenerationKey])
 
+  const handleAuthRedirectUrl = useCallback(
+    async (
+      rawUrl: string,
+      options: { replaceHistory?: boolean; closeBrowser?: boolean } = {},
+    ) => {
+      if (!supabase || !rawUrl) return false
+
+      let parsedUrl: URL
+      try {
+        parsedUrl = new URL(rawUrl)
+      } catch {
+        return false
+      }
+
+      const queryParams = new URLSearchParams(parsedUrl.search)
+      const hashParams = new URLSearchParams(parsedUrl.hash.replace(/^#/, ''))
+      const code = queryParams.get('code')
+      const error = queryParams.get('error') || hashParams.get('error')
+      const errorDescription =
+        queryParams.get('error_description') ||
+        hashParams.get('error_description') ||
+        error
+
+      if (error) {
+        setError(decodeURIComponent(errorDescription || 'Authentication failed.'))
+        if (options.closeBrowser) {
+          void Browser.close()
+        }
+        return false
+      }
+
+      const accessToken = hashParams.get('access_token')
+      const refreshToken = hashParams.get('refresh_token')
+
+      if (code) {
+        await supabase.auth.exchangeCodeForSession(code)
+      } else if (accessToken && refreshToken) {
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        })
+      } else {
+        return false
+      }
+
+      if (options.replaceHistory) {
+        queryParams.delete('code')
+        queryParams.delete('error')
+        queryParams.delete('error_description')
+        const clean = `${parsedUrl.pathname}${
+          queryParams.toString() ? `?${queryParams.toString()}` : ''
+        }`
+        window.history.replaceState({}, '', clean)
+      }
+
+      if (options.closeBrowser) {
+        void Browser.close()
+      }
+
+      return true
+    },
+    [supabase, setError],
+  )
+
   useEffect(() => {
     if (!supabase) {
       setBooting(false)
@@ -9112,17 +9211,7 @@ function App() {
     let active = true
 
     const initializeAuth = async () => {
-      const params = new URLSearchParams(window.location.search)
-      const code = params.get('code')
-
-      if (code) {
-        await supabase.auth.exchangeCodeForSession(code)
-        params.delete('code')
-        const clean = `${window.location.pathname}${
-          params.toString() ? `?${params.toString()}` : ''
-        }`
-        window.history.replaceState({}, '', clean)
-      }
+      await handleAuthRedirectUrl(window.location.href, { replaceHistory: true })
 
       const { data } = await supabase.auth.getSession()
       if (!active) return
@@ -9140,20 +9229,87 @@ function App() {
       active = false
       listener.subscription.unsubscribe()
     }
-  }, [])
+  }, [handleAuthRedirectUrl])
+
+  useEffect(() => {
+    if (!isNativeApp || !supabase) return
+
+    let appUrlListener: PluginListenerHandle | null = null
+    void CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+      if (!url) return
+      void handleAuthRedirectUrl(url, { closeBrowser: true })
+    }).then((listener) => {
+      appUrlListener = listener
+    })
+
+    return () => {
+      appUrlListener?.remove()
+    }
+  }, [isNativeApp, handleAuthRedirectUrl])
+
+  useEffect(() => {
+    if (!isNativeApp) return
+
+    const isDark = theme === 'dark'
+    const style = isDark ? StatusBarStyle.Dark : StatusBarStyle.Light
+    const backgroundColor = isDark ? '#000000' : '#ffffff'
+
+    void StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {})
+    void StatusBar.setStyle({ style }).catch(() => {})
+    void StatusBar.setBackgroundColor({ color: backgroundColor }).catch(() => {})
+  }, [isNativeApp, theme])
+
+  useEffect(() => {
+    if (!isNativeApp) return
+
+    const platform = Capacitor.getPlatform()
+    const useOffset = platform === 'ios'
+    const resizeMode = useOffset ? KeyboardResize.Body : KeyboardResize.Native
+    void CapacitorKeyboard.setResizeMode({ mode: resizeMode }).catch(() => {})
+
+    if (!useOffset) {
+      document.documentElement.style.setProperty('--keyboard-offset', '0px')
+      return () => {
+        document.documentElement.style.setProperty('--keyboard-offset', '0px')
+      }
+    }
+
+    let showListener: PluginListenerHandle | null = null
+    let hideListener: PluginListenerHandle | null = null
+
+    void CapacitorKeyboard.addListener('keyboardWillShow', (info) => {
+      const offset = Math.max(0, info.keyboardHeight || 0)
+      document.documentElement.style.setProperty('--keyboard-offset', `${offset}px`)
+    }).then((listener) => {
+      showListener = listener
+    })
+
+    void CapacitorKeyboard.addListener('keyboardWillHide', () => {
+      document.documentElement.style.setProperty('--keyboard-offset', '0px')
+    }).then((listener) => {
+      hideListener = listener
+    })
+
+    return () => {
+      showListener?.remove()
+      hideListener?.remove()
+      document.documentElement.style.setProperty('--keyboard-offset', '0px')
+    }
+  }, [isNativeApp])
 
   useEffect(() => {
     const isSharedRoute = location.pathname.startsWith('/shared/')
     const isLandingRoute = location.pathname === '/'
+    const allowLandingRoute = isLandingRoute && !isNativeApp
     if (booting) return
     if (session && location.pathname === '/auth') {
       navigate('/chat', { replace: true })
       return
     }
-    if (!session && location.pathname !== '/auth' && !isSharedRoute && !isLandingRoute) {
+    if (!session && location.pathname !== '/auth' && !isSharedRoute && !allowLandingRoute) {
       navigate('/auth', { replace: true })
     }
-  }, [session, booting, location.pathname, navigate])
+  }, [session, booting, location.pathname, navigate, isNativeApp])
 
   useEffect(() => {
     if (booting || !session) return
@@ -10497,6 +10653,8 @@ function App() {
               <div className="screen-loader">Loading...</div>
             ) : session ? (
               <Navigate to="/chat" replace />
+            ) : isNativeApp ? (
+              <Navigate to="/auth" replace />
             ) : (
               <LandingPage session={session} />
             )
@@ -10618,7 +10776,10 @@ function App() {
             )
           }
         />
-        <Route path="*" element={<Navigate to={session ? '/chat' : '/'} replace />} />
+        <Route
+          path="*"
+          element={<Navigate to={session ? '/chat' : isNativeApp ? '/auth' : '/'} replace />}
+        />
       </Routes>
 
       {shareDialogData && (
