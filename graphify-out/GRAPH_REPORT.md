@@ -1,16 +1,16 @@
 # Graph Report - Llama-AI  (2026-05-31)
 
 ## Corpus Check
-- 62 files · ~1,419,319 words
+- 64 files · ~1,419,355 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1433 nodes · 3692 edges · 118 communities (73 shown, 45 thin omitted)
+- 1435 nodes · 3692 edges · 120 communities (75 shown, 45 thin omitted)
 - Extraction: 83% EXTRACTED · 17% INFERRED · 0% AMBIGUOUS · INFERRED: 617 edges (avg confidence: 0.78)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `4f0ca5cb`
+- Built from commit: `6f902491`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -145,11 +145,11 @@
 ## Import Cycles
 - None detected.
 
-## Communities (118 total, 45 thin omitted)
+## Communities (120 total, 45 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.02
-Nodes (4): clearAllCookies(), clearCookies(), gn(), Kn()
+Nodes (4): clearAllCookies(), clearCookies(), dr(), ur()
 
 ### Community 1 - "Community 1"
 Cohesion: 0.05

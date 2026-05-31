@@ -1872,7 +1872,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L8",
       "id": "assets_index_cwvosyyl_gn",
-      "community": 0,
+      "community": 72,
       "norm_label": "gn()"
     },
     {
@@ -4509,7 +4509,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L11",
       "id": "assets_index_cwvosyyl_kn",
-      "community": 0,
+      "community": 72,
       "norm_label": "kn()"
     },
     {
@@ -4536,7 +4536,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L11",
       "id": "assets_index_cwvosyyl_ur",
-      "community": 72,
+      "community": 0,
       "norm_label": "ur()"
     },
     {
@@ -4545,7 +4545,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L11",
       "id": "assets_index_cwvosyyl_dr",
-      "community": 72,
+      "community": 0,
       "norm_label": "dr()"
     },
     {
@@ -9947,6 +9947,24 @@
       "id": "src_main_tsx",
       "community": 2,
       "norm_label": "main.tsx"
+    },
+    {
+      "label": "rehype-katex.d.ts",
+      "file_type": "code",
+      "source_file": "src/types/rehype-katex.d.ts",
+      "source_location": "L1",
+      "id": "src_types_rehype_katex_d_ts",
+      "community": 118,
+      "norm_label": "rehype-katex.d.ts"
+    },
+    {
+      "label": "remark-math.d.ts",
+      "file_type": "code",
+      "source_file": "src/types/remark-math.d.ts",
+      "source_location": "L1",
+      "id": "src_types_remark_math_d_ts",
+      "community": 119,
+      "norm_label": "remark-math.d.ts"
     },
     {
       "label": "AGENTS.md",
@@ -50722,5 +50740,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "4f0ca5cbedf07eea44132b00d263ad9e1f877234"
+  "built_at_commit": "6f902491f0d1f94244be79a651825acdf4b31492"
 }
