@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
+import type { PluggableList } from 'unified'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -270,8 +271,10 @@ const COMPOSER_MODEL_LABELS: Record<ComposerModel, string> = {
 
 const COMPOSER_MODEL_OPTIONS: ComposerModel[] = ['llama', 'fast', 'coder', 'image']
 
-const MARKDOWN_PLUGINS = [remarkGfm, remarkMath]
-const REHYPE_PLUGINS = [[rehypeKatex, { strict: 'ignore', throwOnError: false }]]
+const MARKDOWN_PLUGINS: PluggableList = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS: PluggableList = [
+  [rehypeKatex, { strict: 'ignore', throwOnError: false }],
+]
 
 const isAIModel = (value: unknown): value is AIModel =>
   typeof value === 'string' && value in MODEL_ENGINE_LABELS
@@ -1345,11 +1348,6 @@ const MATH_COMMANDS = [
 ]
 
 const LONG_WORD_REGEX = /\b(?!\\)[A-Za-z]{3,}\b/
-
-const MATH_COMMAND_REGEX = new RegExp(
-  `\\\\(?:${MATH_COMMANDS.join('|')})(?:\\s*\\{[^}]*\\})*(?:\\([^)]*\\))?`,
-  'g',
-)
 
 const MATH_TRIGGER_REGEX = new RegExp(
   `(?:\\\\(?:${MATH_COMMANDS.join('|')}))|[=^_]`,

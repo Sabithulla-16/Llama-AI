@@ -1,7 +1,7 @@
 # Graph Report - Llama-AI  (2026-05-31)
 
 ## Corpus Check
-- 62 files · ~1,419,315 words
+- 62 files · ~1,419,319 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `9db0603f`
+- Built from commit: `4f0ca5cb`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -149,7 +149,7 @@
 
 ### Community 0 - "Community 0"
 Cohesion: 0.02
-Nodes (4): clearAllCookies(), clearCookies(), dr(), ur()
+Nodes (4): clearAllCookies(), clearCookies(), gn(), Kn()
 
 ### Community 1 - "Community 1"
 Cohesion: 0.05

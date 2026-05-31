@@ -28,6 +28,7 @@ pyyaml
 aiofiles
 markdown
 pydantic
+python-multipart
 tqdm
 regex
 statsmodels

@@ -1872,7 +1872,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L8",
       "id": "assets_index_cwvosyyl_gn",
-      "community": 72,
+      "community": 0,
       "norm_label": "gn()"
     },
     {
@@ -4509,7 +4509,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L11",
       "id": "assets_index_cwvosyyl_kn",
-      "community": 72,
+      "community": 0,
       "norm_label": "kn()"
     },
     {
@@ -4536,7 +4536,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L11",
       "id": "assets_index_cwvosyyl_ur",
-      "community": 0,
+      "community": 72,
       "norm_label": "ur()"
     },
     {
@@ -4545,7 +4545,7 @@
       "source_file": "android/app/src/main/assets/public/assets/index-CWVosYYL.js",
       "source_location": "L11",
       "id": "assets_index_cwvosyyl_dr",
-      "community": 0,
+      "community": 72,
       "norm_label": "dr()"
     },
     {
@@ -8674,7 +8674,7 @@
       "label": "Role",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L97",
+      "source_location": "L98",
       "id": "src_app_role",
       "community": 2,
       "norm_label": "role"
@@ -8683,7 +8683,7 @@
       "label": "FeedbackValue",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L98",
+      "source_location": "L99",
       "id": "src_app_feedbackvalue",
       "community": 2,
       "norm_label": "feedbackvalue"
@@ -8692,7 +8692,7 @@
       "label": "Conversation",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L100",
+      "source_location": "L101",
       "id": "src_app_conversation",
       "community": 2,
       "norm_label": "conversation"
@@ -8701,7 +8701,7 @@
       "label": "ChatMessage",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L110",
+      "source_location": "L111",
       "id": "src_app_chatmessage",
       "community": 2,
       "norm_label": "chatmessage"
@@ -8710,7 +8710,7 @@
       "label": "AuthUser",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L124",
+      "source_location": "L125",
       "id": "src_app_authuser",
       "community": 2,
       "norm_label": "authuser"
@@ -8719,7 +8719,7 @@
       "label": "Session",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L133",
+      "source_location": "L134",
       "id": "src_app_session",
       "community": 2,
       "norm_label": "session"
@@ -8728,7 +8728,7 @@
       "label": "ThemeMode",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L140",
+      "source_location": "L141",
       "id": "src_app_thememode",
       "community": 2,
       "norm_label": "thememode"
@@ -8737,7 +8737,7 @@
       "label": "ResponseStyle",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L141",
+      "source_location": "L142",
       "id": "src_app_responsestyle",
       "community": 2,
       "norm_label": "responsestyle"
@@ -8746,7 +8746,7 @@
       "label": "PromptPurpose",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L142",
+      "source_location": "L143",
       "id": "src_app_promptpurpose",
       "community": 2,
       "norm_label": "promptpurpose"
@@ -8755,7 +8755,7 @@
       "label": "TextAIModel",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L143",
+      "source_location": "L144",
       "id": "src_app_textaimodel",
       "community": 2,
       "norm_label": "textaimodel"
@@ -8764,7 +8764,7 @@
       "label": "ComposerModel",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L144",
+      "source_location": "L145",
       "id": "src_app_composermodel",
       "community": 2,
       "norm_label": "composermodel"
@@ -8773,7 +8773,7 @@
       "label": "AIModel",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L145",
+      "source_location": "L146",
       "id": "src_app_aimodel",
       "community": 2,
       "norm_label": "aimodel"
@@ -8782,7 +8782,7 @@
       "label": "VoiceLanguage",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L146",
+      "source_location": "L147",
       "id": "src_app_voicelanguage",
       "community": 2,
       "norm_label": "voicelanguage"
@@ -8791,7 +8791,7 @@
       "label": "GenerationOptions",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L147",
+      "source_location": "L148",
       "id": "src_app_generationoptions",
       "community": 2,
       "norm_label": "generationoptions"
@@ -8800,7 +8800,7 @@
       "label": "ConversationGroupKey",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L158",
+      "source_location": "L159",
       "id": "src_app_conversationgroupkey",
       "community": 2,
       "norm_label": "conversationgroupkey"
@@ -8809,7 +8809,7 @@
       "label": "ShareDialogData",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L160",
+      "source_location": "L161",
       "id": "src_app_sharedialogdata",
       "community": 2,
       "norm_label": "sharedialogdata"
@@ -8818,7 +8818,7 @@
       "label": "GalleryImageItem",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L166",
+      "source_location": "L167",
       "id": "src_app_galleryimageitem",
       "community": 2,
       "norm_label": "galleryimageitem"
@@ -8827,7 +8827,7 @@
       "label": "BranchPreferenceRecord",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L175",
+      "source_location": "L176",
       "id": "src_app_branchpreferencerecord",
       "community": 2,
       "norm_label": "branchpreferencerecord"
@@ -8836,7 +8836,7 @@
       "label": "BranchPreferenceRecordMap",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L182",
+      "source_location": "L183",
       "id": "src_app_branchpreferencerecordmap",
       "community": 2,
       "norm_label": "branchpreferencerecordmap"
@@ -8845,7 +8845,7 @@
       "label": "ImageVariantRecord",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L184",
+      "source_location": "L185",
       "id": "src_app_imagevariantrecord",
       "community": 2,
       "norm_label": "imagevariantrecord"
@@ -8854,7 +8854,7 @@
       "label": "ImageVariantRecordMap",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L192",
+      "source_location": "L193",
       "id": "src_app_imagevariantrecordmap",
       "community": 2,
       "norm_label": "imagevariantrecordmap"
@@ -8863,7 +8863,7 @@
       "label": "UserSettingsRow",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L194",
+      "source_location": "L195",
       "id": "src_app_usersettingsrow",
       "community": 2,
       "norm_label": "usersettingsrow"
@@ -8872,7 +8872,7 @@
       "label": "BACKEND_BASE_URL",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L210",
+      "source_location": "L211",
       "id": "src_app_backend_base_url",
       "community": 2,
       "norm_label": "backend_base_url"
@@ -8881,7 +8881,7 @@
       "label": "BACKEND_API_KEY",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L215",
+      "source_location": "L216",
       "id": "src_app_backend_api_key",
       "community": 2,
       "norm_label": "backend_api_key"
@@ -8890,7 +8890,7 @@
       "label": "FEEDBACK_API_TARGETS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L231",
+      "source_location": "L232",
       "id": "src_app_feedback_api_targets",
       "community": 2,
       "norm_label": "feedback_api_targets"
@@ -8899,7 +8899,7 @@
       "label": "MODEL_ENDPOINTS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L241",
+      "source_location": "L242",
       "id": "src_app_model_endpoints",
       "community": 2,
       "norm_label": "model_endpoints"
@@ -8908,7 +8908,7 @@
       "label": "MODEL_ENGINE_LABELS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L249",
+      "source_location": "L250",
       "id": "src_app_model_engine_labels",
       "community": 2,
       "norm_label": "model_engine_labels"
@@ -8917,7 +8917,7 @@
       "label": "COMPOSER_MODEL_LABELS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L261",
+      "source_location": "L262",
       "id": "src_app_composer_model_labels",
       "community": 2,
       "norm_label": "composer_model_labels"
@@ -8926,7 +8926,7 @@
       "label": "COMPOSER_MODEL_OPTIONS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L271",
+      "source_location": "L272",
       "id": "src_app_composer_model_options",
       "community": 2,
       "norm_label": "composer_model_options"
@@ -8935,7 +8935,7 @@
       "label": "MARKDOWN_PLUGINS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L273",
+      "source_location": "L274",
       "id": "src_app_markdown_plugins",
       "community": 2,
       "norm_label": "markdown_plugins"
@@ -8944,7 +8944,7 @@
       "label": "REHYPE_PLUGINS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L274",
+      "source_location": "L275",
       "id": "src_app_rehype_plugins",
       "community": 2,
       "norm_label": "rehype_plugins"
@@ -8953,7 +8953,7 @@
       "label": "isAIModel()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L276",
+      "source_location": "L279",
       "id": "src_app_isaimodel",
       "community": 40,
       "norm_label": "isaimodel()"
@@ -8962,7 +8962,7 @@
       "label": "isTextAIModel()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L279",
+      "source_location": "L282",
       "id": "src_app_istextaimodel",
       "community": 86,
       "norm_label": "istextaimodel()"
@@ -8971,7 +8971,7 @@
       "label": "isComposerModel()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L282",
+      "source_location": "L285",
       "id": "src_app_iscomposermodel",
       "community": 86,
       "norm_label": "iscomposermodel()"
@@ -8980,7 +8980,7 @@
       "label": "isFeedbackValue()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L285",
+      "source_location": "L288",
       "id": "src_app_isfeedbackvalue",
       "community": 2,
       "norm_label": "isfeedbackvalue()"
@@ -8989,7 +8989,7 @@
       "label": "getTextModelApiUrl()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L288",
+      "source_location": "L291",
       "id": "src_app_gettextmodelapiurl",
       "community": 2,
       "norm_label": "gettextmodelapiurl()"
@@ -8998,7 +8998,7 @@
       "label": "getMessageModel()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L293",
+      "source_location": "L296",
       "id": "src_app_getmessagemodel",
       "community": 40,
       "norm_label": "getmessagemodel()"
@@ -9007,7 +9007,7 @@
       "label": "inferAssistantModelFromThread()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L298",
+      "source_location": "L301",
       "id": "src_app_inferassistantmodelfromthread",
       "community": 40,
       "norm_label": "inferassistantmodelfromthread()"
@@ -9016,7 +9016,7 @@
       "label": "PURPOSE_PROMPTS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L337",
+      "source_location": "L340",
       "id": "src_app_purpose_prompts",
       "community": 2,
       "norm_label": "purpose_prompts"
@@ -9025,7 +9025,7 @@
       "label": "PROMPT_HELP_TEXT",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L380",
+      "source_location": "L383",
       "id": "src_app_prompt_help_text",
       "community": 2,
       "norm_label": "prompt_help_text"
@@ -9034,7 +9034,7 @@
       "label": "PURPOSE_LABELS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L414",
+      "source_location": "L417",
       "id": "src_app_purpose_labels",
       "community": 2,
       "norm_label": "purpose_labels"
@@ -9043,7 +9043,7 @@
       "label": "RESPONSE_STYLE_LABELS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L422",
+      "source_location": "L425",
       "id": "src_app_response_style_labels",
       "community": 2,
       "norm_label": "response_style_labels"
@@ -9052,7 +9052,7 @@
       "label": "CODE_BLOCK_EXPANSION_MEMORY",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L428",
+      "source_location": "L431",
       "id": "src_app_code_block_expansion_memory",
       "community": 2,
       "norm_label": "code_block_expansion_memory"
@@ -9061,7 +9061,7 @@
       "label": "hashCodeBlockKey()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L430",
+      "source_location": "L433",
       "id": "src_app_hashcodeblockkey",
       "community": 46,
       "norm_label": "hashcodeblockkey()"
@@ -9070,7 +9070,7 @@
       "label": "getBranchPreferenceContentKey()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L439",
+      "source_location": "L442",
       "id": "src_app_getbranchpreferencecontentkey",
       "community": 46,
       "norm_label": "getbranchpreferencecontentkey()"
@@ -9079,7 +9079,7 @@
       "label": "getImageVariantContentKey()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L442",
+      "source_location": "L445",
       "id": "src_app_getimagevariantcontentkey",
       "community": 46,
       "norm_label": "getimagevariantcontentkey()"
@@ -9088,7 +9088,7 @@
       "label": "VOICE_LANGUAGE_LABELS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L445",
+      "source_location": "L448",
       "id": "src_app_voice_language_labels",
       "community": 2,
       "norm_label": "voice_language_labels"
@@ -9097,7 +9097,7 @@
       "label": "voicePrimaryTag()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L450",
+      "source_location": "L453",
       "id": "src_app_voiceprimarytag",
       "community": 87,
       "norm_label": "voiceprimarytag()"
@@ -9106,7 +9106,7 @@
       "label": "matchesVoiceLanguage()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L452",
+      "source_location": "L455",
       "id": "src_app_matchesvoicelanguage",
       "community": 87,
       "norm_label": "matchesvoicelanguage()"
@@ -9115,7 +9115,7 @@
       "label": "formatVoiceDisplayName()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L463",
+      "source_location": "L466",
       "id": "src_app_formatvoicedisplayname",
       "community": 2,
       "norm_label": "formatvoicedisplayname()"
@@ -9124,7 +9124,7 @@
       "label": "makeVoiceOptionValue()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L478",
+      "source_location": "L481",
       "id": "src_app_makevoiceoptionvalue",
       "community": 2,
       "norm_label": "makevoiceoptionvalue()"
@@ -9133,7 +9133,7 @@
       "label": "parseVoiceOptionValue()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L483",
+      "source_location": "L486",
       "id": "src_app_parsevoiceoptionvalue",
       "community": 88,
       "norm_label": "parsevoiceoptionvalue()"
@@ -9142,7 +9142,7 @@
       "label": "findVoiceBySelection()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L494",
+      "source_location": "L497",
       "id": "src_app_findvoicebyselection",
       "community": 88,
       "norm_label": "findvoicebyselection()"
@@ -9151,7 +9151,7 @@
       "label": "DropdownOption",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L533",
+      "source_location": "L536",
       "id": "src_app_dropdownoption",
       "community": 2,
       "norm_label": "dropdownoption"
@@ -9160,7 +9160,7 @@
       "label": "CustomDropdownProps",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L538",
+      "source_location": "L541",
       "id": "src_app_customdropdownprops",
       "community": 2,
       "norm_label": "customdropdownprops"
@@ -9169,7 +9169,7 @@
       "label": "CustomDropdown()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L546",
+      "source_location": "L549",
       "id": "src_app_customdropdown",
       "community": 2,
       "norm_label": "customdropdown()"
@@ -9178,7 +9178,7 @@
       "label": "VoiceDropdownProps",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L639",
+      "source_location": "L642",
       "id": "src_app_voicedropdownprops",
       "community": 2,
       "norm_label": "voicedropdownprops"
@@ -9187,7 +9187,7 @@
       "label": "VoiceDropdown()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L650",
+      "source_location": "L653",
       "id": "src_app_voicedropdown",
       "community": 2,
       "norm_label": "voicedropdown()"
@@ -9196,7 +9196,7 @@
       "label": "pickRandomPrompts()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L764",
+      "source_location": "L767",
       "id": "src_app_pickrandomprompts",
       "community": 2,
       "norm_label": "pickrandomprompts()"
@@ -9205,7 +9205,7 @@
       "label": "CONVERSATION_GROUP_LABELS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L770",
+      "source_location": "L773",
       "id": "src_app_conversation_group_labels",
       "community": 2,
       "norm_label": "conversation_group_labels"
@@ -9214,7 +9214,7 @@
       "label": "getConversationGroupKey()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L777",
+      "source_location": "L780",
       "id": "src_app_getconversationgroupkey",
       "community": 2,
       "norm_label": "getconversationgroupkey()"
@@ -9223,7 +9223,7 @@
       "label": "getMessageDateKey()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L793",
+      "source_location": "L796",
       "id": "src_app_getmessagedatekey",
       "community": 2,
       "norm_label": "getmessagedatekey()"
@@ -9232,7 +9232,7 @@
       "label": "formatMessageDateLabel()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L796",
+      "source_location": "L799",
       "id": "src_app_formatmessagedatelabel",
       "community": 2,
       "norm_label": "formatmessagedatelabel()"
@@ -9241,7 +9241,7 @@
       "label": "formatGenerationDuration()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L816",
+      "source_location": "L819",
       "id": "src_app_formatgenerationduration",
       "community": 2,
       "norm_label": "formatgenerationduration()"
@@ -9250,7 +9250,7 @@
       "label": "formatCompletionTime()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L825",
+      "source_location": "L828",
       "id": "src_app_formatcompletiontime",
       "community": 2,
       "norm_label": "formatcompletiontime()"
@@ -9259,7 +9259,7 @@
       "label": "getAuthRedirectUrl()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L846",
+      "source_location": "L849",
       "id": "src_app_getauthredirecturl",
       "community": 2,
       "norm_label": "getauthredirecturl()"
@@ -9268,7 +9268,7 @@
       "label": "BackendQueryFilter",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L858",
+      "source_location": "L861",
       "id": "src_app_backendqueryfilter",
       "community": 2,
       "norm_label": "backendqueryfilter"
@@ -9277,7 +9277,7 @@
       "label": "BackendQueryOrder",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L864",
+      "source_location": "L867",
       "id": "src_app_backendqueryorder",
       "community": 2,
       "norm_label": "backendqueryorder"
@@ -9286,7 +9286,7 @@
       "label": "BackendQueryPayload",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L870",
+      "source_location": "L873",
       "id": "src_app_backendquerypayload",
       "community": 2,
       "norm_label": "backendquerypayload"
@@ -9295,7 +9295,7 @@
       "label": "BackendQueryResponse",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L883",
+      "source_location": "L886",
       "id": "src_app_backendqueryresponse",
       "community": 2,
       "norm_label": "backendqueryresponse"
@@ -9304,7 +9304,7 @@
       "label": "authListeners",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L888",
+      "source_location": "L891",
       "id": "src_app_authlisteners",
       "community": 2,
       "norm_label": "authlisteners"
@@ -9313,7 +9313,7 @@
       "label": "toErrorMessage()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L890",
+      "source_location": "L893",
       "id": "src_app_toerrormessage",
       "community": 18,
       "norm_label": "toerrormessage()"
@@ -9322,7 +9322,7 @@
       "label": "buildBackendHeaders()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L893",
+      "source_location": "L896",
       "id": "src_app_buildbackendheaders",
       "community": 47,
       "norm_label": "buildbackendheaders()"
@@ -9331,7 +9331,7 @@
       "label": "loadStoredSession()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L919",
+      "source_location": "L922",
       "id": "src_app_loadstoredsession",
       "community": 18,
       "norm_label": "loadstoredsession()"
@@ -9340,7 +9340,7 @@
       "label": "saveStoredSession()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L931",
+      "source_location": "L934",
       "id": "src_app_savestoredsession",
       "community": 18,
       "norm_label": "savestoredsession()"
@@ -9349,7 +9349,7 @@
       "label": "isSessionExpiring()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L941",
+      "source_location": "L944",
       "id": "src_app_issessionexpiring",
       "community": 18,
       "norm_label": "issessionexpiring()"
@@ -9358,7 +9358,7 @@
       "label": "requestBackendJson()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L947",
+      "source_location": "L950",
       "id": "src_app_requestbackendjson",
       "community": 47,
       "norm_label": "requestbackendjson()"
@@ -9367,7 +9367,7 @@
       "label": "refreshStoredSession()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L981",
+      "source_location": "L984",
       "id": "src_app_refreshstoredsession",
       "community": 18,
       "norm_label": "refreshstoredsession()"
@@ -9376,7 +9376,7 @@
       "label": "fetchUserForSession()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L989",
+      "source_location": "L992",
       "id": "src_app_fetchuserforsession",
       "community": 2,
       "norm_label": "fetchuserforsession()"
@@ -9385,7 +9385,7 @@
       "label": "BackendQueryBuilder",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L997",
+      "source_location": "L1000",
       "id": "src_app_backendquerybuilder",
       "community": 18,
       "norm_label": "backendquerybuilder"
@@ -9394,7 +9394,7 @@
       "label": ".constructor()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1009",
+      "source_location": "L1012",
       "id": "src_app_backendquerybuilder_constructor",
       "community": 18,
       "norm_label": ".constructor()"
@@ -9403,7 +9403,7 @@
       "label": ".select()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1013",
+      "source_location": "L1016",
       "id": "src_app_backendquerybuilder_select",
       "community": 18,
       "norm_label": ".select()"
@@ -9412,7 +9412,7 @@
       "label": ".insert()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1021",
+      "source_location": "L1024",
       "id": "src_app_backendquerybuilder_insert",
       "community": 18,
       "norm_label": ".insert()"
@@ -9421,7 +9421,7 @@
       "label": ".update()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1027",
+      "source_location": "L1030",
       "id": "src_app_backendquerybuilder_update",
       "community": 18,
       "norm_label": ".update()"
@@ -9430,7 +9430,7 @@
       "label": ".upsert()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1033",
+      "source_location": "L1036",
       "id": "src_app_backendquerybuilder_upsert",
       "community": 18,
       "norm_label": ".upsert()"
@@ -9439,7 +9439,7 @@
       "label": ".delete()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1040",
+      "source_location": "L1043",
       "id": "src_app_backendquerybuilder_delete",
       "community": 18,
       "norm_label": ".delete()"
@@ -9448,7 +9448,7 @@
       "label": ".eq()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1045",
+      "source_location": "L1048",
       "id": "src_app_backendquerybuilder_eq",
       "community": 18,
       "norm_label": ".eq()"
@@ -9457,7 +9457,7 @@
       "label": ".in()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1050",
+      "source_location": "L1053",
       "id": "src_app_backendquerybuilder_in",
       "community": 18,
       "norm_label": ".in()"
@@ -9466,7 +9466,7 @@
       "label": ".not()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1055",
+      "source_location": "L1058",
       "id": "src_app_backendquerybuilder_not",
       "community": 18,
       "norm_label": ".not()"
@@ -9475,7 +9475,7 @@
       "label": ".ilike()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1060",
+      "source_location": "L1063",
       "id": "src_app_backendquerybuilder_ilike",
       "community": 18,
       "norm_label": ".ilike()"
@@ -9484,7 +9484,7 @@
       "label": ".order()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1065",
+      "source_location": "L1068",
       "id": "src_app_backendquerybuilder_order",
       "community": 18,
       "norm_label": ".order()"
@@ -9493,7 +9493,7 @@
       "label": ".range()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1074",
+      "source_location": "L1077",
       "id": "src_app_backendquerybuilder_range",
       "community": 18,
       "norm_label": ".range()"
@@ -9502,7 +9502,7 @@
       "label": ".limit()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1079",
+      "source_location": "L1082",
       "id": "src_app_backendquerybuilder_limit",
       "community": 18,
       "norm_label": ".limit()"
@@ -9511,7 +9511,7 @@
       "label": ".single()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1086",
+      "source_location": "L1089",
       "id": "src_app_backendquerybuilder_single",
       "community": 18,
       "norm_label": ".single()"
@@ -9520,7 +9520,7 @@
       "label": ".maybeSingle()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1092",
+      "source_location": "L1095",
       "id": "src_app_backendquerybuilder_maybesingle",
       "community": 18,
       "norm_label": ".maybesingle()"
@@ -9529,7 +9529,7 @@
       "label": ".execute()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1098",
+      "source_location": "L1101",
       "id": "src_app_backendquerybuilder_execute",
       "community": 18,
       "norm_label": ".execute()"
@@ -9538,7 +9538,7 @@
       "label": ".then()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1139",
+      "source_location": "L1142",
       "id": "src_app_backendquerybuilder_then",
       "community": 18,
       "norm_label": ".then()"
@@ -9547,7 +9547,7 @@
       "label": "createBackendClient()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1149",
+      "source_location": "L1152",
       "id": "src_app_createbackendclient",
       "community": 2,
       "norm_label": "createbackendclient()"
@@ -9556,7 +9556,7 @@
       "label": "safeId()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1272",
+      "source_location": "L1275",
       "id": "src_app_safeid",
       "community": 2,
       "norm_label": "safeid()"
@@ -9565,7 +9565,7 @@
       "label": "createShareToken()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1279",
+      "source_location": "L1282",
       "id": "src_app_createsharetoken",
       "community": 2,
       "norm_label": "createsharetoken()"
@@ -9574,7 +9574,7 @@
       "label": "cleanAssistantOutput()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1286",
+      "source_location": "L1289",
       "id": "src_app_cleanassistantoutput",
       "community": 46,
       "norm_label": "cleanassistantoutput()"
@@ -9583,25 +9583,16 @@
       "label": "MATH_COMMANDS",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1315",
+      "source_location": "L1318",
       "id": "src_app_math_commands",
       "community": 2,
       "norm_label": "math_commands"
     },
     {
-      "label": "MATH_COMMAND_REGEX",
-      "file_type": "code",
-      "source_file": "src/App.tsx",
-      "source_location": "L1349",
-      "id": "src_app_math_command_regex",
-      "community": 2,
-      "norm_label": "math_command_regex"
-    },
-    {
       "label": "MATH_TRIGGER_REGEX",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1354",
+      "source_location": "L1352",
       "id": "src_app_math_trigger_regex",
       "community": 2,
       "norm_label": "math_trigger_regex"
@@ -9610,7 +9601,7 @@
       "label": "normalizeLatexDelimiters()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1358",
+      "source_location": "L1356",
       "id": "src_app_normalizelatexdelimiters",
       "community": 46,
       "norm_label": "normalizelatexdelimiters()"
@@ -9619,7 +9610,7 @@
       "label": "looksLikeMath()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1387",
+      "source_location": "L1385",
       "id": "src_app_lookslikemath",
       "community": 67,
       "norm_label": "lookslikemath()"
@@ -9628,7 +9619,7 @@
       "label": "stripLatexCommands()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1393",
+      "source_location": "L1391",
       "id": "src_app_striplatexcommands",
       "community": 67,
       "norm_label": "striplatexcommands()"
@@ -9637,7 +9628,7 @@
       "label": "hasLongWords()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1397",
+      "source_location": "L1395",
       "id": "src_app_haslongwords",
       "community": 67,
       "norm_label": "haslongwords()"
@@ -9646,7 +9637,7 @@
       "label": "shouldWrapMath()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1401",
+      "source_location": "L1399",
       "id": "src_app_shouldwrapmath",
       "community": 67,
       "norm_label": "shouldwrapmath()"
@@ -9655,7 +9646,7 @@
       "label": "wrapMathSegments()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1405",
+      "source_location": "L1403",
       "id": "src_app_wrapmathsegments",
       "community": 67,
       "norm_label": "wrapmathsegments()"
@@ -9664,7 +9655,7 @@
       "label": "autoWrapMathDelimiters()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1433",
+      "source_location": "L1431",
       "id": "src_app_autowrapmathdelimiters",
       "community": 46,
       "norm_label": "autowrapmathdelimiters()"
@@ -9673,7 +9664,7 @@
       "label": "prepareMarkdownForRender()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1478",
+      "source_location": "L1476",
       "id": "src_app_preparemarkdownforrender",
       "community": 46,
       "norm_label": "preparemarkdownforrender()"
@@ -9682,7 +9673,7 @@
       "label": "ParsedMessageContent",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1484",
+      "source_location": "L1482",
       "id": "src_app_parsedmessagecontent",
       "community": 2,
       "norm_label": "parsedmessagecontent"
@@ -9691,7 +9682,7 @@
       "label": "tryParseMessagePayload()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1492",
+      "source_location": "L1490",
       "id": "src_app_tryparsemessagepayload",
       "community": 40,
       "norm_label": "tryparsemessagepayload()"
@@ -9700,7 +9691,7 @@
       "label": "toDataUrlFromBase64()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1505",
+      "source_location": "L1503",
       "id": "src_app_todataurlfrombase64",
       "community": 40,
       "norm_label": "todataurlfrombase64()"
@@ -9709,7 +9700,7 @@
       "label": "parseMessageContent()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1512",
+      "source_location": "L1510",
       "id": "src_app_parsemessagecontent",
       "community": 40,
       "norm_label": "parsemessagecontent()"
@@ -9718,7 +9709,7 @@
       "label": "normalizeFetchedMessages()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1555",
+      "source_location": "L1553",
       "id": "src_app_normalizefetchedmessages",
       "community": 2,
       "norm_label": "normalizefetchedmessages()"
@@ -9727,7 +9718,7 @@
       "label": "getImageTagValue()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1562",
+      "source_location": "L1560",
       "id": "src_app_getimagetagvalue",
       "community": 2,
       "norm_label": "getimagetagvalue()"
@@ -9736,7 +9727,7 @@
       "label": "getPromptSignatureValue()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1567",
+      "source_location": "L1565",
       "id": "src_app_getpromptsignaturevalue",
       "community": 40,
       "norm_label": "getpromptsignaturevalue()"
@@ -9745,7 +9736,7 @@
       "label": "mapImageDataToFetchedMessageIds()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1571",
+      "source_location": "L1569",
       "id": "src_app_mapimagedatatofetchedmessageids",
       "community": 2,
       "norm_label": "mapimagedatatofetchedmessageids()"
@@ -9754,7 +9745,7 @@
       "label": "resolveImageFromPromptSignature()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1610",
+      "source_location": "L1608",
       "id": "src_app_resolveimagefrompromptsignature",
       "community": 40,
       "norm_label": "resolveimagefrompromptsignature()"
@@ -9763,7 +9754,7 @@
       "label": "deriveTitle()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1626",
+      "source_location": "L1624",
       "id": "src_app_derivetitle",
       "community": 2,
       "norm_label": "derivetitle()"
@@ -9772,7 +9763,7 @@
       "label": "slugify()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1632",
+      "source_location": "L1630",
       "id": "src_app_slugify",
       "community": 2,
       "norm_label": "slugify()"
@@ -9781,7 +9772,7 @@
       "label": "isUuid()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1642",
+      "source_location": "L1640",
       "id": "src_app_isuuid",
       "community": 2,
       "norm_label": "isuuid()"
@@ -9790,7 +9781,7 @@
       "label": "submitMessageFeedback()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1648",
+      "source_location": "L1646",
       "id": "src_app_submitmessagefeedback",
       "community": 2,
       "norm_label": "submitmessagefeedback()"
@@ -9799,7 +9790,7 @@
       "label": "streamCompletion()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1668",
+      "source_location": "L1666",
       "id": "src_app_streamcompletion",
       "community": 47,
       "norm_label": "streamcompletion()"
@@ -9808,7 +9799,7 @@
       "label": "streamImageCompletion()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1801",
+      "source_location": "L1799",
       "id": "src_app_streamimagecompletion",
       "community": 47,
       "norm_label": "streamimagecompletion()"
@@ -9817,7 +9808,7 @@
       "label": "generateImageFromPrompt()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1954",
+      "source_location": "L1952",
       "id": "src_app_generateimagefromprompt",
       "community": 47,
       "norm_label": "generateimagefromprompt()"
@@ -9826,7 +9817,7 @@
       "label": "CopyableCodeBlock()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L1992",
+      "source_location": "L1990",
       "id": "src_app_copyablecodeblock",
       "community": 2,
       "norm_label": "copyablecodeblock()"
@@ -9835,7 +9826,7 @@
       "label": "AuthScreen()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L2588",
+      "source_location": "L2586",
       "id": "src_app_authscreen",
       "community": 2,
       "norm_label": "authscreen()"
@@ -9844,7 +9835,7 @@
       "label": "LandingPageProps",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L2913",
+      "source_location": "L2911",
       "id": "src_app_landingpageprops",
       "community": 2,
       "norm_label": "landingpageprops"
@@ -9853,7 +9844,7 @@
       "label": "LandingPage()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L2917",
+      "source_location": "L2915",
       "id": "src_app_landingpage",
       "community": 2,
       "norm_label": "landingpage()"
@@ -9862,7 +9853,7 @@
       "label": "ImageGenerationPlaceholder()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L3024",
+      "source_location": "L3022",
       "id": "src_app_imagegenerationplaceholder",
       "community": 2,
       "norm_label": "imagegenerationplaceholder()"
@@ -9871,7 +9862,7 @@
       "label": "ProgressiveImage()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L3046",
+      "source_location": "L3044",
       "id": "src_app_progressiveimage",
       "community": 2,
       "norm_label": "progressiveimage()"
@@ -9880,7 +9871,7 @@
       "label": "ImageSlotLoader()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L3108",
+      "source_location": "L3106",
       "id": "src_app_imageslotloader",
       "community": 2,
       "norm_label": "imageslotloader()"
@@ -9889,7 +9880,7 @@
       "label": "ChatWorkspaceProps",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L3126",
+      "source_location": "L3124",
       "id": "src_app_chatworkspaceprops",
       "community": 2,
       "norm_label": "chatworkspaceprops"
@@ -9898,7 +9889,7 @@
       "label": "ChatWorkspace()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L3175",
+      "source_location": "L3173",
       "id": "src_app_chatworkspace",
       "community": 46,
       "norm_label": "chatworkspace()"
@@ -9907,7 +9898,7 @@
       "label": "DashboardProps",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L6841",
+      "source_location": "L6839",
       "id": "src_app_dashboardprops",
       "community": 2,
       "norm_label": "dashboardprops"
@@ -9916,7 +9907,7 @@
       "label": "Dashboard()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L6883",
+      "source_location": "L6881",
       "id": "src_app_dashboard",
       "community": 2,
       "norm_label": "dashboard()"
@@ -9925,7 +9916,7 @@
       "label": "GalleryView()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L7591",
+      "source_location": "L7589",
       "id": "src_app_galleryview",
       "community": 2,
       "norm_label": "galleryview()"
@@ -9934,7 +9925,7 @@
       "label": "SharedConversationView()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L7817",
+      "source_location": "L7815",
       "id": "src_app_sharedconversationview",
       "community": 2,
       "norm_label": "sharedconversationview()"
@@ -9943,7 +9934,7 @@
       "label": "App()",
       "file_type": "code",
       "source_file": "src/App.tsx",
-      "source_location": "L8937",
+      "source_location": "L8935",
       "id": "src_app_app",
       "community": 2,
       "norm_label": "app()"
@@ -10415,6 +10406,15 @@
       "id": "frontend_design_skill_frontend_aesthetics_guidelines",
       "community": 60,
       "norm_label": "frontend aesthetics guidelines"
+    },
+    {
+      "label": "MATH_COMMAND_REGEX",
+      "file_type": "code",
+      "source_file": "src/App.tsx",
+      "source_location": "L1349",
+      "community": 2,
+      "norm_label": "math_command_regex",
+      "id": "src_app_math_command_regex"
     },
     {
       "label": "capacitor.config.ts",
@@ -46484,9 +46484,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1433",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_autowrapmathdelimiters",
-      "confidence_score": 1.0
+      "target": "src_app_autowrapmathdelimiters"
     },
     {
       "relation": "contains",
@@ -47014,9 +47014,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1397",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_haslongwords",
-      "confidence_score": 1.0
+      "target": "src_app_haslongwords"
     },
     {
       "relation": "contains",
@@ -47164,9 +47164,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1387",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_lookslikemath",
-      "confidence_score": 1.0
+      "target": "src_app_lookslikemath"
     },
     {
       "relation": "contains",
@@ -47214,9 +47214,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1349",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_math_command_regex",
-      "confidence_score": 1.0
+      "target": "src_app_math_command_regex"
     },
     {
       "relation": "contains",
@@ -47224,9 +47224,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1315",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_math_commands",
-      "confidence_score": 1.0
+      "target": "src_app_math_commands"
     },
     {
       "relation": "contains",
@@ -47234,9 +47234,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1354",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_math_trigger_regex",
-      "confidence_score": 1.0
+      "target": "src_app_math_trigger_regex"
     },
     {
       "relation": "contains",
@@ -47274,9 +47274,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1358",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_normalizelatexdelimiters",
-      "confidence_score": 1.0
+      "target": "src_app_normalizelatexdelimiters"
     },
     {
       "relation": "contains",
@@ -47324,9 +47324,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1478",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_preparemarkdownforrender",
-      "confidence_score": 1.0
+      "target": "src_app_preparemarkdownforrender"
     },
     {
       "relation": "contains",
@@ -47504,9 +47504,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1401",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_shouldwrapmath",
-      "confidence_score": 1.0
+      "target": "src_app_shouldwrapmath"
     },
     {
       "relation": "contains",
@@ -47544,9 +47544,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1393",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_striplatexcommands",
-      "confidence_score": 1.0
+      "target": "src_app_striplatexcommands"
     },
     {
       "relation": "contains",
@@ -47674,9 +47674,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1405",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_tsx",
-      "target": "src_app_wrapmathsegments",
-      "confidence_score": 1.0
+      "target": "src_app_wrapmathsegments"
     },
     {
       "relation": "imports_from",
@@ -48119,9 +48119,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1479",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_preparemarkdownforrender",
-      "target": "src_app_cleanassistantoutput",
-      "confidence_score": 1.0
+      "target": "src_app_cleanassistantoutput"
     },
     {
       "relation": "calls",
@@ -48130,9 +48130,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1480",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_preparemarkdownforrender",
-      "target": "src_app_normalizelatexdelimiters",
-      "confidence_score": 1.0
+      "target": "src_app_normalizelatexdelimiters"
     },
     {
       "relation": "calls",
@@ -48141,9 +48141,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1402",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_shouldwrapmath",
-      "target": "src_app_lookslikemath",
-      "confidence_score": 1.0
+      "target": "src_app_lookslikemath"
     },
     {
       "relation": "calls",
@@ -48152,9 +48152,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1406",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_wrapmathsegments",
-      "target": "src_app_lookslikemath",
-      "confidence_score": 1.0
+      "target": "src_app_lookslikemath"
     },
     {
       "relation": "calls",
@@ -48163,9 +48163,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1398",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_haslongwords",
-      "target": "src_app_striplatexcommands",
-      "confidence_score": 1.0
+      "target": "src_app_striplatexcommands"
     },
     {
       "relation": "calls",
@@ -48174,9 +48174,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1402",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_shouldwrapmath",
-      "target": "src_app_haslongwords",
-      "confidence_score": 1.0
+      "target": "src_app_haslongwords"
     },
     {
       "relation": "calls",
@@ -48185,9 +48185,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L1481",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_preparemarkdownforrender",
-      "target": "src_app_autowrapmathdelimiters",
-      "confidence_score": 1.0
+      "target": "src_app_autowrapmathdelimiters"
     },
     {
       "relation": "calls",
@@ -48196,9 +48196,9 @@
       "source_file": "src/App.tsx",
       "source_location": "L6622",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_app_chatworkspace",
-      "target": "src_app_preparemarkdownforrender",
-      "confidence_score": 1.0
+      "target": "src_app_preparemarkdownforrender"
     },
     {
       "relation": "calls",
@@ -50722,5 +50722,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "9db0603f097427729e5e2188754f77c96fe438ee"
+  "built_at_commit": "4f0ca5cbedf07eea44132b00d263ad9e1f877234"
 }
