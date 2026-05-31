@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { createClient } from '@supabase/supabase-js'
-import type { Session } from '@supabase/supabase-js'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Browser } from '@capacitor/browser'
 import { Capacitor } from '@capacitor/core'
@@ -121,6 +121,22 @@ type ChatMessage = {
   created_at: string
 }
 
+type AuthUser = {
+  id: string
+  email?: string
+  created_at?: string
+  user_metadata?: {
+    full_name?: string
+  }
+}
+
+type Session = {
+  access_token: string
+  refresh_token?: string | null
+  expires_at?: number | null
+  user: AuthUser
+}
+
 type ThemeMode = 'light' | 'dark'
 type ResponseStyle = 'balanced' | 'concise' | 'detailed'
 type PromptPurpose = 'general' | 'coding' | 'business' | 'study' | 'writing'
@@ -191,28 +207,20 @@ type UserSettingsRow = {
   data_analytics_enabled: boolean | null
 }
 
-const API_BASE =
-  ((import.meta.env.VITE_API_BASE_URL as string | undefined) ||
-    'https://valtry-llama3-2-3b-quantized.hf.space').replace(/\/+$/, '')
-const IMAGE_GEN_API_BASE =
-  ((import.meta.env.VITE_IMAGE_GEN_API_BASE_URL as string | undefined) ||
-    'https://valtry-llama-img-gen.hf.space').replace(/\/+$/, '')
-const FAST_API_BASE =
-  ((import.meta.env.VITE_FAST_API_BASE_URL as string | undefined) ||
-    'https://Valtry-llama-fast.hf.space').replace(/\/+$/, '')
-const CODER_API_BASE =
-  ((import.meta.env.VITE_CODER_API_BASE_URL as string | undefined) ||
-    'https://sabithulla-llama-coder.hf.space').replace(/\/+$/, '')
-const CODE_RUNNER_API =
-  ((import.meta.env.VITE_CODE_RUNNER_STREAM_API as string | undefined) ||
-    'https://code-runner-5ov9.onrender.com')
+const BACKEND_BASE_URL =
+  ((import.meta.env.VITE_BACKEND_BASE_URL as string | undefined) ||
+    'http://localhost:10000')
     .trim()
     .replace(/\/+$/, '')
-const TITLE_API_URL =
-  ((import.meta.env.VITE_TITLE_API_URL as string | undefined) ||
-    'https://valtry-llama-title.hf.space/generate-title')
-    .trim()
-    .replace(/\/+$/, '')
+const BACKEND_API_KEY = import.meta.env.VITE_BACKEND_API_KEY as string | undefined
+
+// Everything routes through the backend; the backend can proxy to upstream services.
+const API_BASE = BACKEND_BASE_URL
+const IMAGE_GEN_API_BASE = BACKEND_BASE_URL
+const FAST_API_BASE = BACKEND_BASE_URL
+const CODER_API_BASE = BACKEND_BASE_URL
+const CODE_RUNNER_API = BACKEND_BASE_URL
+const TITLE_API_URL = `${BACKEND_BASE_URL}/generate-title`
 const CODE_RUNNER_STREAM_API = CODE_RUNNER_API.endsWith('/run/stream')
   ? CODE_RUNNER_API
   : `${CODE_RUNNER_API}/run/stream`
@@ -230,7 +238,6 @@ const FEEDBACK_API_TARGETS = Array.from(
 const IMAGE_STREAM_API = `${API_BASE}/v1/chat/image/stream`
 const IMAGE_GENERATE_API = `${IMAGE_GEN_API_BASE}/generate`
 const FAST_STREAM_API = `${FAST_API_BASE}/v1/chat/stream`
-const CODER_STREAM_API = `${CODER_API_BASE}/v1/chat/stream`
 const MODEL_ENDPOINTS: Record<TextAIModel, string> = {
   llama: '/v1/chat/llama',
   qwen: '/v1/chat/qwen',
@@ -263,6 +270,9 @@ const COMPOSER_MODEL_LABELS: Record<ComposerModel, string> = {
 
 const COMPOSER_MODEL_OPTIONS: ComposerModel[] = ['llama', 'fast', 'coder', 'image']
 
+const MARKDOWN_PLUGINS = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS = [[rehypeKatex, { strict: 'ignore', throwOnError: false }]]
+
 const isAIModel = (value: unknown): value is AIModel =>
   typeof value === 'string' && value in MODEL_ENGINE_LABELS
 
@@ -277,7 +287,6 @@ const isFeedbackValue = (value: unknown): value is FeedbackValue =>
 
 const getTextModelApiUrl = (model: TextAIModel) => {
   if (model === 'fast') return FAST_STREAM_API
-  if (model === 'coder') return CODER_STREAM_API
   return `${API_BASE}${MODEL_ENDPOINTS[model]}`
 }
 
@@ -839,37 +848,426 @@ const getAuthRedirectUrl = (isNative: boolean) =>
     ? mobileAuthRedirectUrl
     : webAuthRedirectUrl || `${window.location.origin}/chat`
 
+const backendConfigError = !BACKEND_BASE_URL
+  ? 'Missing backend API base URL. Set VITE_BACKEND_BASE_URL.'
+  : null
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+const AUTH_SESSION_STORAGE_KEY = 'llama-backend-session'
+const AUTH_OAUTH_VERIFIER_KEY = 'llama-oauth-verifier'
 
-const readJwtRole = (token: string | undefined) => {
-  if (!token) return null
-  const parts = token.split('.')
-  if (parts.length < 2) return null
+type BackendQueryFilter = {
+  column: string
+  op: string
+  value: unknown
+}
 
+type BackendQueryOrder = {
+  column: string
+  ascending?: boolean
+  nulls_first?: boolean | null
+}
+
+type BackendQueryPayload = {
+  table: 'conversations' | 'messages' | 'user_settings'
+  action: 'select' | 'insert' | 'update' | 'delete' | 'upsert'
+  select?: string
+  data?: unknown
+  filters?: BackendQueryFilter[]
+  order?: BackendQueryOrder[]
+  range?: [number, number]
+  single?: boolean
+  maybe_single?: boolean
+  on_conflict?: string
+}
+
+type BackendQueryResponse<T = any> = {
+  data: T | null
+  error: { message: string } | null
+}
+
+const authListeners = new Set<(session: Session | null) => void>()
+
+const toErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Request failed.'
+
+const buildBackendHeaders = (options: {
+  accessToken?: string | null
+  accept?: string
+  contentType?: string
+} = {}) => {
+  const headers: Record<string, string> = {}
+
+  if (options.contentType) {
+    headers['Content-Type'] = options.contentType
+  }
+
+  if (options.accept) {
+    headers.Accept = options.accept
+  }
+
+  if (BACKEND_API_KEY) {
+    headers['x-backend-token'] = BACKEND_API_KEY
+  }
+
+  if (options.accessToken) {
+    headers.Authorization = `Bearer ${options.accessToken}`
+  }
+
+  return headers
+}
+
+const loadStoredSession = (): Session | null => {
   try {
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-    const padLength = (4 - (base64.length % 4)) % 4
-    const padded = base64.padEnd(base64.length + padLength, '=')
-    const json = JSON.parse(globalThis.atob(padded)) as { role?: unknown }
-    return typeof json.role === 'string' ? json.role : null
+    const raw = localStorage.getItem(AUTH_SESSION_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Session
+    if (!parsed?.access_token || !parsed?.user?.id) return null
+    return parsed
   } catch {
     return null
   }
 }
 
-const supabaseKeyRole = readJwtRole(supabaseAnonKey)
-const supabaseConfigError = !supabaseUrl || !supabaseAnonKey
-  ? 'Missing Supabase keys. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
-  : supabaseKeyRole === 'service_role'
-  ? 'Security misconfiguration: VITE_SUPABASE_ANON_KEY contains a service_role key. Use the public anon key only.'
-  : null
+const saveStoredSession = (session: Session | null) => {
+  if (session) {
+    localStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify(session))
+  } else {
+    localStorage.removeItem(AUTH_SESSION_STORAGE_KEY)
+  }
 
-const supabase =
-  !supabaseConfigError && supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null
+  authListeners.forEach((listener) => listener(session))
+}
+
+const isSessionExpiring = (session: Session | null) => {
+  if (!session?.expires_at) return false
+  const now = Math.floor(Date.now() / 1000)
+  return session.expires_at <= now + 30
+}
+
+const requestBackendJson = async <T,>(
+  path: string,
+  options: {
+    method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
+    payload?: unknown
+    accessToken?: string | null
+    accept?: string
+    contentType?: string
+  } = {},
+): Promise<T> => {
+  const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
+    method: options.method || 'POST',
+    headers: buildBackendHeaders({
+      accessToken: options.accessToken,
+      accept: options.accept,
+      contentType: options.contentType || (options.payload ? 'application/json' : undefined),
+    }),
+    body: options.payload ? JSON.stringify(options.payload) : undefined,
+  })
+
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`
+    try {
+      const bodyText = await response.text()
+      message = bodyText || message
+    } catch {
+      // Ignore body parsing failures.
+    }
+    throw new Error(message)
+  }
+
+  return (await response.json()) as T
+}
+
+const refreshStoredSession = async (refreshToken: string) => {
+  const session = await requestBackendJson<Session>('/api/auth/refresh', {
+    payload: { refresh_token: refreshToken },
+  })
+  saveStoredSession(session)
+  return session
+}
+
+const fetchUserForSession = async (accessToken: string) => {
+  const response = await requestBackendJson<{ user: AuthUser }>('/api/auth/session', {
+    method: 'GET',
+    accessToken,
+  })
+  return response.user
+}
+
+class BackendQueryBuilder implements PromiseLike<BackendQueryResponse<any>> {
+  private table: BackendQueryPayload['table']
+  private action: BackendQueryPayload['action'] | null = null
+  private selectColumns: string | undefined
+  private payloadData: unknown
+  private filters: BackendQueryFilter[] = []
+  private orderBy: BackendQueryOrder[] = []
+  private rangeValue: [number, number] | undefined
+  private singleRow = false
+  private maybeSingleRow = false
+  private onConflict: string | undefined
+
+  constructor(table: BackendQueryPayload['table']) {
+    this.table = table
+  }
+
+  select(columns: string) {
+    this.selectColumns = columns
+    if (!this.action) {
+      this.action = 'select'
+    }
+    return this
+  }
+
+  insert(data: unknown) {
+    this.action = 'insert'
+    this.payloadData = data
+    return this
+  }
+
+  update(data: unknown) {
+    this.action = 'update'
+    this.payloadData = data
+    return this
+  }
+
+  upsert(data: unknown, options?: { onConflict?: string }) {
+    this.action = 'upsert'
+    this.payloadData = data
+    this.onConflict = options?.onConflict
+    return this
+  }
+
+  delete() {
+    this.action = 'delete'
+    return this
+  }
+
+  eq(column: string, value: unknown) {
+    this.filters.push({ column, op: 'eq', value })
+    return this
+  }
+
+  in(column: string, value: unknown[]) {
+    this.filters.push({ column, op: 'in', value })
+    return this
+  }
+
+  not(column: string, op: string, value: unknown) {
+    this.filters.push({ column, op: `not.${op}`, value })
+    return this
+  }
+
+  ilike(column: string, value: unknown) {
+    this.filters.push({ column, op: 'ilike', value })
+    return this
+  }
+
+  order(column: string, options?: { ascending?: boolean; nullsFirst?: boolean }) {
+    this.orderBy.push({
+      column,
+      ascending: options?.ascending ?? true,
+      nulls_first: options?.nullsFirst ?? null,
+    })
+    return this
+  }
+
+  range(from: number, to: number) {
+    this.rangeValue = [from, to]
+    return this
+  }
+
+  limit(count: number) {
+    if (!this.rangeValue) {
+      this.rangeValue = [0, Math.max(0, count - 1)]
+    }
+    return this
+  }
+
+  single() {
+    this.singleRow = true
+    this.maybeSingleRow = false
+    return this
+  }
+
+  maybeSingle() {
+    this.maybeSingleRow = true
+    this.singleRow = false
+    return this
+  }
+
+  async execute<T = any>(): Promise<BackendQueryResponse<T>> {
+    const action = this.action || 'select'
+    let session = loadStoredSession()
+    if (session && isSessionExpiring(session) && session.refresh_token) {
+      try {
+        session = await refreshStoredSession(session.refresh_token)
+      } catch {
+        saveStoredSession(null)
+        session = null
+      }
+    }
+    const accessToken = session?.access_token || null
+    const payload: BackendQueryPayload = {
+      table: this.table,
+      action,
+      select: this.selectColumns,
+      data: this.payloadData,
+      filters: this.filters,
+      order: this.orderBy,
+      range: this.rangeValue,
+      single: this.singleRow,
+      maybe_single: this.maybeSingleRow,
+      on_conflict: this.onConflict,
+    }
+
+    try {
+      const response = await requestBackendJson<BackendQueryResponse<T>>('/api/data/query', {
+        payload,
+        accessToken,
+      })
+
+      if (response.error) {
+        return { data: null, error: { message: response.error.message || 'Request failed.' } }
+      }
+
+      return { data: response.data ?? null, error: null }
+    } catch (error) {
+      return { data: null, error: { message: toErrorMessage(error) } }
+    }
+  }
+
+  then<TResult1 = BackendQueryResponse<any>, TResult2 = never>(
+    onfulfilled?:
+      | ((value: BackendQueryResponse<any>) => TResult1 | PromiseLike<TResult1>)
+      | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): PromiseLike<TResult1 | TResult2> {
+    return this.execute().then(onfulfilled, onrejected)
+  }
+}
+
+const createBackendClient = () => {
+  const auth = {
+    async signInWithPassword(payload: { email: string; password: string }) {
+      try {
+        const session = await requestBackendJson<Session>('/api/auth/sign-in', {
+          payload,
+        })
+        saveStoredSession(session)
+        return { data: { session }, error: null }
+      } catch (error) {
+        return { data: { session: null }, error: { message: toErrorMessage(error) } }
+      }
+    },
+    async signUp(payload: { email: string; password: string; options?: { data?: Record<string, unknown> } }) {
+      try {
+        const session = await requestBackendJson<Session>('/api/auth/sign-up', {
+          payload: {
+            email: payload.email,
+            password: payload.password,
+            data: payload.options?.data || {},
+          },
+        })
+        saveStoredSession(session)
+        return { data: { session }, error: null }
+      } catch (error) {
+        return { data: { session: null }, error: { message: toErrorMessage(error) } }
+      }
+    },
+    async signInWithOAuth(payload: { provider: string; options?: { redirectTo?: string; scopes?: string; skipBrowserRedirect?: boolean } }) {
+      try {
+        const response = await requestBackendJson<{ url: string; code_verifier: string }>('/api/auth/oauth/start', {
+          payload: {
+            provider: payload.provider,
+            redirect_to: payload.options?.redirectTo,
+            scopes: payload.options?.scopes,
+          },
+        })
+        localStorage.setItem(AUTH_OAUTH_VERIFIER_KEY, response.code_verifier)
+        return { data: { url: response.url }, error: null }
+      } catch (error) {
+        return { data: { url: null }, error: { message: toErrorMessage(error) } }
+      }
+    },
+    async exchangeCodeForSession(code: string) {
+      try {
+        const verifier = localStorage.getItem(AUTH_OAUTH_VERIFIER_KEY)
+        if (!verifier) {
+          throw new Error('Missing OAuth verifier.')
+        }
+        const session = await requestBackendJson<Session>('/api/auth/oauth/exchange', {
+          payload: { code, code_verifier: verifier },
+        })
+        localStorage.removeItem(AUTH_OAUTH_VERIFIER_KEY)
+        saveStoredSession(session)
+        return { data: { session }, error: null }
+      } catch (error) {
+        return { data: { session: null }, error: { message: toErrorMessage(error) } }
+      }
+    },
+    async setSession(payload: { access_token: string; refresh_token?: string | null }) {
+      try {
+        const user = await fetchUserForSession(payload.access_token)
+        const session: Session = {
+          access_token: payload.access_token,
+          refresh_token: payload.refresh_token ?? null,
+          user,
+        }
+        saveStoredSession(session)
+        return { data: { session }, error: null }
+      } catch (error) {
+        return { data: { session: null }, error: { message: toErrorMessage(error) } }
+      }
+    },
+    async getSession() {
+      let session = loadStoredSession()
+      if (session && isSessionExpiring(session) && session.refresh_token) {
+        try {
+          session = await refreshStoredSession(session.refresh_token)
+        } catch {
+          saveStoredSession(null)
+          session = null
+        }
+      }
+      return { data: { session } }
+    },
+    onAuthStateChange(callback: (event: string, session: Session | null) => void) {
+      const listener = (session: Session | null) => callback('SESSION', session)
+      authListeners.add(listener)
+      return {
+        data: {
+          subscription: {
+            unsubscribe: () => authListeners.delete(listener),
+          },
+        },
+      }
+    },
+    async signOut() {
+      const token = loadStoredSession()?.access_token
+      if (token) {
+        try {
+          await requestBackendJson('/api/auth/sign-out', {
+            payload: {},
+            accessToken: token,
+          })
+        } catch {
+          // Ignore sign-out errors.
+        }
+      }
+      saveStoredSession(null)
+      return { error: null }
+    },
+  }
+
+  return {
+    auth,
+    from(table: BackendQueryPayload['table']) {
+      return new BackendQueryBuilder(table)
+    },
+  }
+}
+
+const supabase = backendConfigError ? null : createBackendClient()
 
 function safeId(prefix: string) {
   const uuid =
@@ -912,6 +1310,175 @@ function cleanAssistantOutput(raw: string) {
   const cleaned = cleanedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 
   return cleaned
+}
+
+const MATH_COMMANDS = [
+  'frac',
+  'sqrt',
+  'approx',
+  'lapprox',
+  'times',
+  'cdot',
+  'leq',
+  'geq',
+  'neq',
+  'pm',
+  'infty',
+  'sum',
+  'int',
+  'lim',
+  'to',
+  'ln',
+  'log',
+  'sin',
+  'cos',
+  'tan',
+  'theta',
+  'alpha',
+  'beta',
+  'gamma',
+  'delta',
+  'sigma',
+  'mu',
+  'lambda',
+  'pi',
+]
+
+const LONG_WORD_REGEX = /\b(?!\\)[A-Za-z]{3,}\b/
+
+const MATH_COMMAND_REGEX = new RegExp(
+  `\\\\(?:${MATH_COMMANDS.join('|')})(?:\\s*\\{[^}]*\\})*(?:\\([^)]*\\))?`,
+  'g',
+)
+
+const MATH_TRIGGER_REGEX = new RegExp(
+  `(?:\\\\(?:${MATH_COMMANDS.join('|')}))|[=^_]`,
+)
+
+function normalizeLatexDelimiters(text: string) {
+  const lines = text.split('\n')
+  let inFence = false
+
+  return lines
+    .map((line) => {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence
+        return line
+      }
+
+      if (inFence) return line
+
+      return line
+        .replace(/\\frc\b/g, '\\frac')
+        .replace(/\\lapprox\b/g, '\\approx')
+        .replace(/\\apprx\b/g, '\\approx')
+        .replace(/\\approx\b/g, '\\approx')
+        .replace(/\\\[(.+?)\\\]/g, (_, inner) => `$$${inner}$$`)
+        .replace(/\\\((.+?)\\\)/g, (_, inner) => `$${inner}$`)
+        .replace(/(^|[^\\])\bln\s*\(/gi, '$1\\ln(')
+        .replace(/(^|[^\\])\blog\s*\(/gi, '$1\\log(')
+        .replace(/(^|[^\\])\bsin\s*\(/gi, '$1\\sin(')
+        .replace(/(^|[^\\])\bcos\s*\(/gi, '$1\\cos(')
+        .replace(/(^|[^\\])\btan\s*\(/gi, '$1\\tan(')
+    })
+    .join('\n')
+}
+
+function looksLikeMath(text: string) {
+  if (!text) return false
+  if (text.includes('$')) return false
+  return MATH_TRIGGER_REGEX.test(text)
+}
+
+function stripLatexCommands(value: string) {
+  return value.replace(/\\[A-Za-z]+/g, '')
+}
+
+function hasLongWords(value: string) {
+  return LONG_WORD_REGEX.test(stripLatexCommands(value))
+}
+
+function shouldWrapMath(value: string) {
+  return looksLikeMath(value) && !hasLongWords(value)
+}
+
+function wrapMathSegments(segment: string) {
+  if (!looksLikeMath(segment)) return segment
+
+  let updated = segment
+
+  updated = updated.replace(/\(([^)]*\\[a-zA-Z]+[^)]*)\)/g, (match, inner) => {
+    if (!shouldWrapMath(inner)) return match
+    return `$${match}$`
+  })
+
+  updated = updated.replace(
+    /([0-9A-Za-z]+\s*\^\{[^}]*\\[a-zA-Z]+[^}]*\})/g,
+    (match) => (shouldWrapMath(match) ? `$${match}$` : match),
+  )
+
+  updated = updated.replace(
+    /([0-9A-Za-z]+\s*_\{[^}]*\\[a-zA-Z]+[^}]*\})/g,
+    (match) => (shouldWrapMath(match) ? `$${match}$` : match),
+  )
+
+  updated = updated.replace(
+    /([0-9A-Za-z\s()+\-*/.=,^_{}]*\\[a-zA-Z]+[0-9A-Za-z\s()+\-*/.=,^_{}]*)/g,
+    (match) => (shouldWrapMath(match) ? `$${match.trim()}$` : match),
+  )
+
+  return updated
+}
+
+function autoWrapMathDelimiters(text: string) {
+  const lines = text.split('\n')
+  let inFence = false
+
+  return lines
+    .map((line) => {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence
+        return line
+      }
+
+      if (inFence) return line
+
+      if (line.includes('$')) return line
+
+      const colonIndex = line.indexOf(':')
+      if (colonIndex >= 0) {
+        const prefix = line.slice(0, colonIndex + 1)
+        const tail = line.slice(colonIndex + 1).trim()
+        if (looksLikeMath(tail)) {
+          return `${prefix} $${tail}$`
+        }
+      }
+
+      const trimmed = line.trim()
+      const mathOnly =
+        looksLikeMath(trimmed) &&
+        !/[a-zA-Z]{3,}/.test(trimmed.replace(/\\[a-zA-Z]+/g, '')) &&
+        /[0-9a-zA-Z\\]/.test(trimmed)
+
+      if (mathOnly) {
+        return `$${trimmed}$`
+      }
+
+      const inlineParts = line.split(/(`[^`]*`)/g)
+      return inlineParts
+        .map((part) => {
+          if (!part || part.startsWith('`')) return part
+          return wrapMathSegments(part)
+        })
+        .join('')
+    })
+    .join('\n')
+}
+
+function prepareMarkdownForRender(raw: string) {
+  const cleaned = cleanAssistantOutput(raw)
+  const normalized = normalizeLatexDelimiters(cleaned)
+  return autoWrapMathDelimiters(normalized)
 }
 
 type ParsedMessageContent = {
@@ -1083,9 +1650,7 @@ async function submitMessageFeedback(messageId: string, feedback: FeedbackValue)
     FEEDBACK_API_TARGETS.map((apiUrl) =>
       fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: buildBackendHeaders({ contentType: 'application/json' }),
         body: JSON.stringify({ message_id: messageId, feedback }),
       }),
     ),
@@ -1119,10 +1684,10 @@ async function streamCompletion(
 ) {
   const response = await fetch(apiUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
+    headers: buildBackendHeaders({
+      contentType: 'application/json',
+      accept: 'text/event-stream',
+    }),
     body: JSON.stringify({
       user_id: payload.user_id,
       conversation_id: payload.conversation_id,
@@ -1260,9 +1825,7 @@ async function streamImageCompletion(
 
   const response = await fetch(apiUrl, {
     method: 'POST',
-    headers: {
-      Accept: 'text/event-stream',
-    },
+    headers: buildBackendHeaders({ accept: 'text/event-stream' }),
     body: formData,
     signal,
   })
@@ -1401,9 +1964,7 @@ async function generateImageFromPrompt(
 ) {
   const response = await fetch(apiUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: buildBackendHeaders({ contentType: 'application/json' }),
     body: JSON.stringify({
       user_id: payload.user_id,
       conversation_id: payload.conversation_id,
@@ -1700,10 +2261,10 @@ function CopyableCodeBlock({
     try {
       const response = await fetch(CODE_RUNNER_STREAM_API, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-        },
+        headers: buildBackendHeaders({
+          contentType: 'application/json',
+          accept: 'text/event-stream',
+        }),
         body: JSON.stringify({
           code: textContent,
           language: runnableLanguage,
@@ -1896,7 +2457,8 @@ function CopyableCodeBlock({
         {hasNestedFencedBlocks ? (
           <div className="embedded-markdown-code">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={MARKDOWN_PLUGINS}
+              rehypePlugins={REHYPE_PLUGINS}
               components={{
                 code: ({ node, className, children, ...props }) => {
                   const nestedCode = String(children)
@@ -2100,6 +2662,10 @@ function AuthScreen() {
         showAuthPopup('error', 'Could not open the browser for Google sign-in.')
       }
     }
+    if (!isNativeApp && data?.url) {
+      window.location.assign(data.url)
+      return
+    }
     setPending(false)
   }
 
@@ -2187,8 +2753,8 @@ function AuthScreen() {
 
           {!supabase && (
             <p className="error-text">
-              {supabaseConfigError ||
-                'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'}
+              {backendConfigError ||
+                'Backend is not configured. Set VITE_BACKEND_BASE_URL.'}
             </p>
           )}
 
@@ -4145,10 +4711,12 @@ function ChatWorkspace({
         .order('created_at', { ascending: false })
         .limit(60)
 
-      const targetAssistantId = (recentAssistantRows || []).find((row) => {
+      const targetAssistantId = (recentAssistantRows || []).find(
+        (row: { id?: string; content?: string | null }) => {
         const candidateText = getComparableAssistantText(String(row.content || ''))
         return candidateText === normalizedContent
-      })?.id as string | undefined
+      },
+      )?.id as string | undefined
 
       if (targetAssistantId) {
         const { error: writeBothError } = await supabase
@@ -5472,7 +6040,8 @@ function ChatWorkspace({
                                 <ImageSlotLoader />
                               ) : (
                                 <ReactMarkdown
-                                  remarkPlugins={[remarkGfm]}
+                                  remarkPlugins={MARKDOWN_PLUGINS}
+                                  rehypePlugins={REHYPE_PLUGINS}
                                   components={{
                                     code: ({ node, className, children, ...props }) => {
                                       const code = String(children)
@@ -5500,7 +6069,7 @@ function ChatWorkspace({
                                     },
                                   }}
                                 >
-                                  {cleanAssistantOutput(effectiveAssistantDisplayContent)}
+                                  {prepareMarkdownForRender(effectiveAssistantDisplayContent)}
                                 </ReactMarkdown>
                               )}
                             </div>
@@ -6015,7 +6584,8 @@ function ChatWorkspace({
                   <div className="branch-compare-head">Response 1</div>
                   <div className="branch-compare-body">
                     <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
+                      remarkPlugins={MARKDOWN_PLUGINS}
+                      rehypePlugins={REHYPE_PLUGINS}
                       components={{
                         code: ({ className, children, ...props }) => {
                           const code = String(children)
@@ -6049,7 +6619,7 @@ function ChatWorkspace({
                         },
                       }}
                     >
-                      {cleanAssistantOutput(
+                      {prepareMarkdownForRender(
                         branchComparisons[activeBranchSelectionId].originalContent || '',
                       )}
                     </ReactMarkdown>
@@ -6073,7 +6643,8 @@ function ChatWorkspace({
                       </div>
                     ) : (
                       <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
+                        remarkPlugins={MARKDOWN_PLUGINS}
+                        rehypePlugins={REHYPE_PLUGINS}
                         components={{
                           code: ({ className, children, ...props }) => {
                             const code = String(children)
@@ -6107,7 +6678,7 @@ function ChatWorkspace({
                           },
                         }}
                       >
-                        {cleanAssistantOutput(
+                        {prepareMarkdownForRender(
                           branchComparisons[activeBranchSelectionId].branchContent ||
                             'No branch response yet.',
                         )}
@@ -7071,7 +7642,7 @@ function GalleryView({
 
   useEffect(() => {
     if (!supabase) {
-      setError('Gallery unavailable: Supabase is not configured.')
+      setError('Gallery unavailable: backend is not configured.')
       setLoading(false)
       return
     }
@@ -7684,7 +8255,7 @@ function SharedConversationView() {
 
   useEffect(() => {
     if (!supabase) {
-      setError('Shared conversations are unavailable: Supabase is not configured.')
+      setError('Shared conversations are unavailable: backend is not configured.')
       setLoading(false)
       return
     }
@@ -7701,47 +8272,29 @@ function SharedConversationView() {
     const loadSharedConversation = async () => {
       setLoading(true)
       setError('')
+      try {
+        const response = await requestBackendJson<{
+          conversation: { id: string; title?: string | null }
+          messages: ChatMessage[]
+        }>(`/api/data/shared/${token}`, { method: 'GET' })
 
-      const { data: conversation, error: conversationError } = await supabase
-        .from('conversations')
-        .select('id, title')
-        .eq('share_token', token)
-        .eq('is_shared', true)
-        .maybeSingle()
+        if (!active) return
 
-      if (!active) return
+        if (!response?.conversation?.id) {
+          setError('This shared conversation is unavailable or no longer shared.')
+          setLoading(false)
+          return
+        }
 
-      if (conversationError) {
-        setError(conversationError.message)
+        setTitle(response.conversation.title || 'Shared Conversation')
+        setSharedConversationId(response.conversation.id)
+        setMessages(normalizeFetchedMessages((response.messages || []) as ChatMessage[]))
         setLoading(false)
-        return
-      }
-
-      if (!conversation?.id) {
-        setError('This shared conversation is unavailable or no longer shared.')
+      } catch (error) {
+        if (!active) return
+        setError(toErrorMessage(error))
         setLoading(false)
-        return
       }
-
-      setTitle(conversation.title || 'Shared Conversation')
-      setSharedConversationId(conversation.id)
-
-      const { data: sharedMessages, error: messagesError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversation.id)
-        .order('created_at', { ascending: true })
-
-      if (!active) return
-
-      if (messagesError) {
-        setError(messagesError.message)
-        setLoading(false)
-        return
-      }
-
-      setMessages(normalizeFetchedMessages((sharedMessages || []) as ChatMessage[]))
-      setLoading(false)
     }
 
     void loadSharedConversation()
@@ -8115,7 +8668,8 @@ function SharedConversationView() {
                             </div>
                           ) : (
                             <ReactMarkdown
-                              remarkPlugins={[remarkGfm]}
+                              remarkPlugins={MARKDOWN_PLUGINS}
+                              rehypePlugins={REHYPE_PLUGINS}
                               components={{
                                 code: ({ node, className, children, ...props }) => {
                                   const code = String(children)
@@ -8143,7 +8697,7 @@ function SharedConversationView() {
                                 },
                               }}
                             >
-                              {cleanAssistantOutput(assistantDisplayContent)}
+                              {prepareMarkdownForRender(assistantDisplayContent)}
                             </ReactMarkdown>
                           )}
                         </div>
@@ -8162,7 +8716,38 @@ function SharedConversationView() {
                             )}
                           </div>
                         ) : (
-                          <p>{parsedContent.text}</p>
+                          <ReactMarkdown
+                            remarkPlugins={MARKDOWN_PLUGINS}
+                            rehypePlugins={REHYPE_PLUGINS}
+                            components={{
+                              code: ({ node, className, children, ...props }) => {
+                                const code = String(children)
+                                const language = className?.replace('language-', '')
+                                const meta =
+                                  ((node as { data?: { meta?: string }; meta?: string } | undefined)
+                                    ?.data?.meta ||
+                                    (node as { meta?: string } | undefined)?.meta ||
+                                    '')
+                                const isBlock = Boolean(language) || code.includes('\n')
+
+                                if (isBlock) {
+                                  return (
+                                    <CopyableCodeBlock language={language} meta={meta}>
+                                      {code}
+                                    </CopyableCodeBlock>
+                                  )
+                                }
+
+                                return (
+                                  <code className={className} {...props}>
+                                    {children}
+                                  </code>
+                                )
+                              },
+                            }}
+                          >
+                            {prepareMarkdownForRender(parsedContent.text)}
+                          </ReactMarkdown>
                         )}
                       </div>
                     )}
@@ -8789,7 +9374,7 @@ function App() {
 
         if (settingsError) {
           setError(settingsError.message)
-          showNotice('Could not load settings from Supabase.')
+          showNotice('Could not load settings from the backend.')
           return
         }
 
@@ -8800,7 +9385,7 @@ function App() {
 
           if (insertError) {
             setError(insertError.message)
-            showNotice('Could not initialize settings in Supabase.')
+            showNotice('Could not initialize settings in the backend.')
             return
           }
 
@@ -9671,8 +10256,14 @@ function App() {
           .order('created_at', { ascending: false })
           .limit(60)
 
-        if (!matchingError && recentAssistantRows && recentAssistantRows.length > 0) {
-          const matchingRows = recentAssistantRows.filter((row) => {
+        const typedRows = (recentAssistantRows || []) as Array<{
+          id?: string
+          created_at?: string | null
+          content?: string | null
+        }>
+
+        if (!matchingError && typedRows.length > 0) {
+          const matchingRows = typedRows.filter((row) => {
             const candidateText = getComparableAssistantText(String(row.content || ''))
             return candidateText === normalizedContent
           })
@@ -9799,9 +10390,7 @@ function App() {
     try {
       const response = await fetch(TITLE_API_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: buildBackendHeaders({ contentType: 'application/json' }),
         body: JSON.stringify({
           conversation_id: conversationId,
           prompt: trimmedPrompt,
@@ -9901,9 +10490,10 @@ function App() {
       .order('created_at', { ascending: false })
       .limit(10)
 
-    const duplicateIds = (duplicateRows || [])
+    const typedDuplicateRows = (duplicateRows || []) as Array<{ id?: string }>
+    const duplicateIds = typedDuplicateRows
       .map((row) => row.id as string)
-      .filter((rowId) => !originalPromptMessageId || rowId !== originalPromptMessageId)
+      .filter((rowId: string) => !originalPromptMessageId || rowId !== originalPromptMessageId)
 
     if (duplicateIds.length === 0) return
 
@@ -9933,9 +10523,13 @@ function App() {
       .order('created_at', { ascending: false })
       .limit(10)
 
+    const typedFallbackRows = (fallbackRows || []) as Array<{
+      id?: string
+      created_at?: string | null
+    }>
     const fallbackId =
-      (fallbackRows || []).find((row) => row.created_at === replaceAssistantCreatedAt)?.id ||
-      fallbackRows?.[0]?.id
+      typedFallbackRows.find((row) => row.created_at === replaceAssistantCreatedAt)?.id ||
+      typedFallbackRows[0]?.id
 
     return typeof fallbackId === 'string' && isUuid(fallbackId) ? fallbackId : null
   }
@@ -10030,13 +10624,17 @@ function App() {
           .order('created_at', { ascending: false })
           .limit(10)
 
+        const typedFallbackRows = (fallbackRows || []) as Array<{
+          id?: string
+          created_at?: string | null
+        }>
         let fallbackId =
-          (fallbackRows || []).find(
+          typedFallbackRows.find(
             (row) => row.created_at === replaceAssistantCreatedAt,
           )?.id as string | undefined
 
         if (!fallbackId) {
-          fallbackId = fallbackRows?.[0]?.id as string | undefined
+          fallbackId = typedFallbackRows[0]?.id as string | undefined
         }
 
         if (fallbackId) {
@@ -10359,7 +10957,7 @@ function App() {
             stopTargets.map((target) =>
               fetch(target, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: buildBackendHeaders({ contentType: 'application/json' }),
                 body: JSON.stringify({ conversation_id: conversationId }),
               }),
             ),
@@ -10736,7 +11334,11 @@ function App() {
               <Dashboard
                 email={session.user.email || 'unknown'}
                 userId={session.user.id}
-                joinedAt={new Date(session.user.created_at).toLocaleDateString()}
+                  joinedAt={
+                    session.user.created_at
+                      ? new Date(session.user.created_at).toLocaleDateString()
+                      : 'Unknown'
+                  }
                 totalConversations={conversations.length}
                 totalMessages={Object.values(messagesMap).reduce(
                   (sum, items) => sum + items.length,

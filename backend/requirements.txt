@@ -28,3 +28,16 @@ pyyaml
 aiofiles
 markdown
 pydantic
+tqdm
+regex
+statsmodels
+networkx
+nltk
+spacy
+textblob
+wordcloud
+joblib
+scikit-image
+imageio
+opencv-python-headless
+xgboost
